@@ -15,6 +15,32 @@ cd personal-knowledge-rag-webapp
 http://127.0.0.1:8765
 ```
 
+## 最短使用路径
+
+日常优先使用统一入口：
+
+```bash
+./scripts/pkb.sh workflow
+./scripts/pkb.sh doctor
+./scripts/pkb.sh open
+```
+
+已有 PDF：
+
+```bash
+./scripts/pkb.sh ingest /path/to/pdfs --topic "研究方向"
+./scripts/pkb.sh ask "这个方向的核心问题是什么？"
+./scripts/pkb.sh markdown "生成带证据的研究摘要" --type research_summary
+```
+
+结果不准或流程异常时生成 Codex handoff：
+
+```bash
+./scripts/pkb.sh codex --reason "关键论文没有被检索到"
+```
+
+更多场景见 `docs/optimized_usage.md`，可复用 Codex 提示词见 `docs/codex_prompt_pack_cn.md`。
+
 当前实现使用 Python 标准库 HTTP server、SQLite、本机已有的 PyMuPDF，以及 vendored Mozilla PDF.js。如需指定带有项目依赖的解释器，可设置 `PKB_PYTHON`。大型模型、OCR 模型、embedding 模型和权重默认放在项目内已忽略的目录：
 
 ```text

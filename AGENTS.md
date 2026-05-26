@@ -22,6 +22,66 @@ bd prime                # Refresh Beads context
 - Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
 <!-- END BEADS CODEX SETUP -->
 
+## Personal Research OS Operating Rules
+
+Treat this project as a local-first Personal Research OS. The core path is:
+
+```text
+研究方向 -> 资料发现/导入 -> 文档库确认 -> 本地索引 -> 证据检索 -> Markdown 输出 -> 维护/Codex 修复
+```
+
+Optimize for the user's lowest time cost, not for adding more surface area. Prefer one clear next action, evidence-backed output, and repair handoffs that another Codex run can reproduce.
+
+### Startup Protocol
+
+At the start of project work, read the relevant local instructions and run the smallest useful baseline:
+
+```bash
+git status --short
+./scripts/pkb.sh doctor
+python3 -m pytest -q
+node --check static/app.js
+```
+
+If `pytest` is missing, use the unittest fallback and state the dependency gap:
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/pkb-pycache python3 -m unittest discover -s tests -v
+```
+
+When a command does not exist or cannot run in the local environment, do not infer success. Report the exact fallback and whether it was verified.
+
+### Unified CLI
+
+Use `scripts/pkb.sh` as the daily command entry when possible:
+
+```bash
+./scripts/pkb.sh workflow
+./scripts/pkb.sh doctor
+./scripts/pkb.sh open
+./scripts/pkb.sh ingest /path/to/pdfs --topic "研究方向"
+./scripts/pkb.sh ask "问题"
+./scripts/pkb.sh markdown "生成带证据的研究摘要" --type research_summary
+./scripts/pkb.sh codex --reason "具体问题"
+```
+
+`docs/optimized_usage.md` is the human-facing short path. `docs/codex_prompt_pack_cn.md` and `docs/codex_execution_guide_cn.md` hold reusable Chinese task prompts. `AGENTS.codex.template.md` preserves the full imported execution-kit template; do not blindly overwrite this file with it.
+
+### Evidence, Privacy, And Modification Rules
+
+- Do not invent paper claims, citations, DOI metadata, file contents, or test results.
+- Default all user-imported documents to private unless the user or metadata says otherwise.
+- Do not send private/confidential documents to API embedding, API retrieval, or API LLM paths without explicit user authorization.
+- Do not bypass login, CAPTCHA, paywalls, 403/429 responses, or institutional access warnings.
+- Do not delete raw files, databases, indexes, `.env`, or user configuration automatically.
+- Keep local vector, API vector, BM25, and graph coverage visible and explain missing coverage.
+- For retrieval changes, preserve audit trails and explain why expected evidence was hit, skipped, or missing.
+- For UI changes, keep the homepage focused on shortest path and next action rather than adding more top-level navigation.
+
+### Final Report
+
+Final reports must be in Chinese and separate verified facts from guesses. Include changed files, verification commands and results, current shortest use path, real risks, and the next concrete action. If a report file is created under `reports/codex/`, include its path.
+
 ## Default Codex Task Isolation
 
 The user wants future Codex windows to focus on the task request itself. Do not require the user to repeat branch, worktree, or Beads setup instructions in each prompt.
