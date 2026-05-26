@@ -1,0 +1,40 @@
+.env
+.env.*
+!.env.example
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local agent/editor state.
+.agents/
+.ai-agent-tools/
+.beads/
+.beads.backup-*/
+.codegraph/
+.cursor/
+
+# Private or generated runtime data.
+data/raw/
+db/
+indexes/
+cache/
+backups/
+logs/
+run/
+outputs/
+reports/codex/
+
+# Large local models and downloaded weights must live outside this project.
+local_models/
+models/
+*.safetensors
+*.gguf
+*.bin
+*.onnx
+
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

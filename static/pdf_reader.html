@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PDF 阅读器</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/vendor/pdfjs/web/pdf_viewer.css" />
+    <style>
+      body {
+        background: #f3f5f7;
+        color: #20242a;
+      }
+      .reader-app {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 380px;
+        min-height: 100vh;
+      }
+      .reader-main {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-width: 0;
+      }
+      .reader-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+      }
+      .reader-toolbar button,
+      .reader-toolbar input,
+      .reader-toolbar select {
+        min-height: 36px;
+      }
+      .page-field {
+        width: 84px;
+      }
+      .pdf-stage {
+        position: relative;
+        overflow: auto;
+        padding: 18px;
+      }
+      .canvas-wrap {
+        position: relative;
+        width: fit-content;
+        margin: 0 auto;
+        box-shadow: 0 12px 28px rgba(20, 30, 40, 0.16);
+      }
+      #pdfCanvas {
+        display: block;
+        background: #fff;
+      }
+      .focus-overlay {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        display: none;
+        padding: 12px 16px;
+        background: rgba(255, 215, 87, 0.34);
+        border-bottom: 2px solid rgba(184, 128, 0, 0.65);
+        color: #4b3400;
+        font-size: 13px;
+        line-height: 1.45;
+        pointer-events: none;
+      }
+      .focus-overlay.active {
+        display: block;
+      }
+      .reader-side {
+        border-left: 1px solid var(--line);
+        background: #fff;
+        overflow: auto;
+        padding: 14px;
+      }
+      .reader-side h2 {
+        margin-top: 0;
+      }
+      .chunk-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        margin: 10px 0;
+        background: #fff;
+      }
+      .chunk-card.active {
+        border-color: #b7791f;
+        background: #fff8e1;
+      }
+      .chunk-card button {
+        margin-top: 8px;
+      }
+      .reader-status {
+        color: var(--muted);
+        min-width: 220px;
+      }
+      @media (max-width: 940px) {
+        .reader-app {
+          grid-template-columns: 1fr;
+        }
+        .reader-side {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+          max-height: 42vh;
+        }
+        .pdf-stage {
+          padding: 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="reader-app">
+      <main class="reader-main">
+        <div class="reader-toolbar">
+          <button id="prevPage" class="secondary">上一页</button>
+          <input id="pageInput" class="page-field" type="number" min="1" value="1" />
+          <span id="pageCount" class="reader-status">/ ?</span>
+          <button id="nextPage" class="secondary">下一页</button>
+          <select id="scaleSelect" aria-label="缩放">
+            <option value="0.9">90%</option>
+            <option value="1.1" selected>110%</option>
+            <option value="1.35">135%</option>
+            <option value="1.6">160%</option>
+            <option value="2">200%</option>
+          </select>
+          <a id="rawLink" class="button secondary" target="_blank" rel="noreferrer">原始 PDF</a>
+          <span id="readerStatus" class="reader-status">加载中</span>
+        </div>
+        <section class="pdf-stage">
+          <div class="canvas-wrap">
+            <canvas id="pdfCanvas"></canvas>
+            <div id="focusOverlay" class="focus-overlay"></div>
+          </div>
+        </section>
+      </main>
+      <aside class="reader-side">
+        <h2>PDF 阅读器</h2>
+        <div class="panel">
+          <h3>来源信息</h3>
+          <pre id="readerMeta" class="json-box"></pre>
+        </div>
+        <div class="panel">
+          <h3>证据定位</h3>
+          <pre id="focusMeta" class="json-box"></pre>
+        </div>
+        <div class="panel">
+          <h3>文本块</h3>
+          <div id="readerChunks"></div>
+        </div>
+      </aside>
+    </div>
+
+    <script type="module">
+      import * as pdfjsLib from "/vendor/pdfjs/legacy/build/pdf.mjs";
+
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/legacy/build/pdf.worker.mjs";
+
+      const params = new URLSearchParams(location.search);
+      const sourceId = params.get("source_id");
+      const initialChunkId = params.get("chunk_id");
+      const citationId = params.get("citation_id");
+      const canvas = document.getElementById("pdfCanvas");
+      const context = canvas.getContext("2d");
+      const statusEl = document.getElementById("readerStatus");
+      const pageInput = document.getElementById("pageInput");
+      const pageCount = document.getElementById("pageCount");
+      const chunksEl = document.getElementById("readerChunks");
+      const metaEl = document.getElementById("readerMeta");
+      const focusMetaEl = document.getElementById("focusMeta");
+      const focusOverlay = document.getElementById("focusOverlay");
+      const rawLink = document.getElementById("rawLink");
+
+      const state = {
+        pdf: null,
+        pageNum: Math.max(1, Number(params.get("page") || 1)),
+        scale: Number(document.getElementById("scaleSelect").value),
+        source: null,
+        chunks: [],
+        focusChunkId: initialChunkId,
+      };
+
+      function esc(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function updateUrl() {
+        const next = new URL(location.href);
+        next.searchParams.set("source_id", sourceId);
+        next.searchParams.set("page", String(state.pageNum));
+        if (state.focusChunkId) next.searchParams.set("chunk_id", state.focusChunkId);
+        if (citationId) next.searchParams.set("citation_id", citationId);
+        history.replaceState(null, "", next.toString());
+      }
+
+      async function fetchJson(path) {
+        const res = await fetch(path);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
+        return data;
+      }
+
+      function currentFocusChunk() {
+        return state.chunks.find((chunk) => chunk.chunk_id === state.focusChunkId) || null;
+      }
+
+      function renderFocus() {
+        const chunk = currentFocusChunk();
+        const focus = {
+          source_id: sourceId,
+          citation_id: citationId,
+          chunk_id: state.focusChunkId,
+          page: state.pageNum,
+          limitation: "当前统一文本块未保存 PDF 文本坐标，因此使用页级高亮和侧栏证据定位。",
+          chunk,
+        };
+        focusMetaEl.textContent = JSON.stringify(focus, null, 2);
+        if (chunk && Number(chunk.page_number || 1) === state.pageNum) {
+          focusOverlay.textContent = `当前证据：${chunk.chunk_id} / 第 ${chunk.page_number} 页。此文本块暂无精确文本坐标。`;
+          focusOverlay.classList.add("active");
+        } else {
+          focusOverlay.classList.remove("active");
+          focusOverlay.textContent = "";
+        }
+        chunksEl.querySelectorAll(".chunk-card").forEach((card) => {
+          card.classList.toggle("active", card.dataset.chunkId === state.focusChunkId);
+        });
+      }
+
+      async function renderPage(pageNumber) {
+        if (!state.pdf) return;
+        statusEl.textContent = "渲染中";
+        const safePage = Math.min(Math.max(1, pageNumber), state.pdf.numPages);
+        state.pageNum = safePage;
+        pageInput.value = String(safePage);
+        pageCount.textContent = `/ ${state.pdf.numPages}`;
+        const page = await state.pdf.getPage(safePage);
+        const viewport = page.getViewport({ scale: state.scale });
+        const outputScale = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(viewport.width * outputScale);
+        canvas.height = Math.floor(viewport.height * outputScale);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+        await page.render({ canvasContext: context, viewport, transform }).promise;
+        updateUrl();
+        renderFocus();
+        statusEl.textContent = "就绪";
+      }
+
+      function renderChunks() {
+        chunksEl.innerHTML =
+          state.chunks
+            .map(
+              (chunk) => `<article class="chunk-card" data-chunk-id="${esc(chunk.chunk_id)}">
+                <div class="evidence-meta">
+                  <span class="pill">第 ${esc(chunk.page_number || "")} 页</span>
+                  <span class="pill">${esc(chunk.chunk_id)}</span>
+                </div>
+                <div class="evidence-text">${esc(chunk.text_preview || "")}</div>
+                <button class="secondary" data-jump="${esc(chunk.chunk_id)}" data-page="${esc(chunk.page_number || 1)}">定位</button>
+              </article>`,
+            )
+            .join("") || '<div class="muted">暂无文本块</div>';
+        chunksEl.querySelectorAll("[data-jump]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            state.focusChunkId = button.dataset.jump;
+            await renderPage(Number(button.dataset.page || 1));
+          });
+        });
+      }
+
+      async function load() {
+        if (!sourceId) {
+          statusEl.textContent = "缺少 source_id";
+          metaEl.textContent = "缺少 source_id";
+          return;
+        }
+        const rawUrl = `/api/source/raw?source_id=${encodeURIComponent(sourceId)}`;
+        rawLink.href = rawUrl;
+        const sources = await fetchJson("/api/sources");
+        const chunks = await fetchJson(`/api/chunks?source_id=${encodeURIComponent(sourceId)}`);
+        state.source = (sources.sources || []).find((item) => item.source_id === sourceId) || null;
+        state.chunks = chunks.chunks || [];
+        metaEl.textContent = JSON.stringify({ source_id: sourceId, source: state.source }, null, 2);
+        renderChunks();
+        const focusChunk = currentFocusChunk();
+        if (focusChunk?.page_number) {
+          state.pageNum = Number(focusChunk.page_number);
+        }
+        state.pdf = await pdfjsLib.getDocument({
+          url: rawUrl,
+          cMapUrl: "/vendor/pdfjs/cmaps/",
+          cMapPacked: true,
+          standardFontDataUrl: "/vendor/pdfjs/standard_fonts/",
+        }).promise;
+        await renderPage(state.pageNum);
+      }
+
+      document.getElementById("prevPage").addEventListener("click", () => renderPage(state.pageNum - 1));
+      document.getElementById("nextPage").addEventListener("click", () => renderPage(state.pageNum + 1));
+      pageInput.addEventListener("change", () => renderPage(Number(pageInput.value || 1)));
+      document.getElementById("scaleSelect").addEventListener("change", (event) => {
+        state.scale = Number(event.currentTarget.value);
+        renderPage(state.pageNum);
+      });
+
+      load().catch((err) => {
+        statusEl.textContent = "失败";
+        metaEl.textContent = err.stack || err.message;
+      });
+    </script>
+  </body>
+</html>

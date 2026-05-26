@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>个人知识库</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <button class="brand home-button nav-item active" data-page="dashboard" aria-label="回到工作台">
+          <div class="brand-mark">PK</div>
+          <div>
+            <h1>Personal Research OS</h1>
+            <p>本地知识库 · <span id="healthText">检查中</span></p>
+          </div>
+        </button>
+
+        <div class="runtime-boundary" aria-label="运行边界">
+          <span>本地优先</span>
+          <span>API 可选</span>
+          <span>原文保留</span>
+        </div>
+      </header>
+
+      <section class="workflow-strip" aria-label="研究动线">
+        <div class="workflow-intro">
+          <span id="workflowTitle">00 工作台</span>
+          <strong id="workflowSummary">查看库状态、最近导入和失败记录。</strong>
+        </div>
+
+        <nav class="nav flow-nav" aria-label="核心动线">
+          <button class="nav-item flow-step active" data-page="dashboard" data-branch="dashboard"><span>00</span><strong>工作台</strong><small>状态总览</small></button>
+          <button class="nav-item flow-step" data-page="collect" data-branch="collect"><span>01</span><strong>收集</strong><small>发现 / 导入 / 入库</small></button>
+          <button class="nav-item flow-step" data-page="retrieve" data-branch="retrieve"><span>02</span><strong>检索</strong><small>问答 / 审计 / 定位</small></button>
+          <button class="nav-item flow-step" data-page="publish" data-branch="publish"><span>03</span><strong>输出</strong><small>Markdown</small></button>
+          <button class="nav-item flow-step" data-page="maintain" data-branch="maintain"><span>04</span><strong>维护</strong><small>索引 / 设置</small></button>
+        </nav>
+
+        <nav class="nav branch-nav" aria-label="分支工具" hidden>
+          <div class="branch-tools" data-branch="collect">
+            <button class="nav-item branch-item" data-page="upload">收集资料</button>
+            <button class="nav-item branch-item" data-page="sources">文档库</button>
+            <button class="nav-item branch-item" data-page="processing">处理状态</button>
+          </div>
+          <div class="branch-tools" data-branch="retrieve">
+            <button class="nav-item branch-item" data-page="query">检索问答</button>
+            <button class="nav-item branch-item" data-page="audits">检索审计</button>
+            <button class="nav-item branch-item" data-page="pdf">PDF 阅读器</button>
+            <button class="nav-item branch-item" data-page="compare">评估</button>
+          </div>
+          <div class="branch-tools" data-branch="publish">
+            <button class="nav-item branch-item" data-page="outputs">Markdown 输出</button>
+          </div>
+          <div class="branch-tools" data-branch="maintain">
+            <button class="nav-item branch-item" data-page="maintenance">维护中心</button>
+            <button class="nav-item branch-item" data-page="settings">设置</button>
+          </div>
+        </nav>
+      </section>
+
+      <main class="main">
+        <section id="page-dashboard" class="page active">
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">研究动线</p>
+              <h2>工作台</h2>
+            </div>
+            <button id="refreshDashboard" class="secondary">刷新</button>
+          </div>
+          <div id="metrics" class="metric-grid"></div>
+          <div class="layout-two">
+            <section class="panel">
+              <h3>索引覆盖</h3>
+              <div id="coverageSummary"></div>
+            </section>
+            <section class="panel">
+              <h3>后端状态</h3>
+              <div id="backendStatus"></div>
+            </section>
+          </div>
+          <section class="panel">
+            <h3>最近导入</h3>
+            <div id="recentIngestions"></div>
+          </section>
+          <section class="panel">
+            <h3>导入失败</h3>
+            <div id="failedIngestions"></div>
+          </section>
+        </section>
+
+        <section id="page-upload" class="page">
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">发现 → 获取全文 → 入库</p>
+              <h2>收集资料</h2>
+            </div>
+          </div>
+          <div class="mode-tabs" role="tablist" aria-label="收集方式">
+            <button type="button" class="nav-item mode-tab active" data-page="upload">本地导入</button>
+            <button type="button" class="nav-item mode-tab" data-page="literature">文献发现</button>
+            <button type="button" class="nav-item mode-tab" data-page="doi">DOI 下载</button>
+          </div>
+          <section class="panel">
+            <form id="importForm" class="form-grid import-form">
+              <div class="segmented-field span-4">
+                <span class="field-label">导入来源</span>
+                <div class="segmented-control" role="radiogroup" aria-label="导入来源">
+                  <label>
+                    <input type="radio" name="source_kind" value="file" checked />
+                    <span>PDF 文件</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="source_kind" value="folder" />
+                    <span>PDF 文件夹</span>
+                  </label>
+                </div>
+              </div>
+              <label class="file-field span-2" data-import-source="file">
+                文件
+                <span class="file-picker">
+                  <input class="file-picker-input" type="file" name="file" accept="application/pdf" required />
+                  <span class="file-picker-action">选择 PDF</span>
+                  <span class="file-picker-name" data-empty="未选择文件">未选择文件</span>
+                </span>
+              </label>
+              <label class="span-2" data-import-source="folder" hidden>
+                文件夹路径
+                <input name="folder" placeholder="/path/to/pdf-folder" />
+              </label>
+              <label>
+                默认领域
+                <select name="domain">
+                  <option value="paper">论文</option>
+                  <option value="chat">对话</option>
+                  <option value="image">图片</option>
+                  <option value="doc">文档</option>
+                  <option value="project">项目</option>
+                  <option value="note">笔记</option>
+                  <option value="misc">其他</option>
+                </select>
+              </label>
+              <label>
+                敏感级别
+                <select name="sensitivity" id="importSensitivity">
+                  <option value="public">公开</option>
+                  <option value="private">私有</option>
+                  <option value="confidential">机密</option>
+                </select>
+              </label>
+              <label class="span-2">
+                主题
+                <input name="topic" placeholder="主题" />
+              </label>
+              <div id="importClassificationHint" class="policy-box span-2">
+                当前批量导入使用同一默认领域；自动分类适合作为导入后的建议，不直接覆盖人工敏感级别。
+              </div>
+              <div id="importSensitivityHint" class="policy-box span-2"></div>
+              <button type="submit" data-import-submit>开始导入</button>
+            </form>
+          </section>
+          <section class="panel">
+            <h3>导入结果</h3>
+            <pre id="ingestResult" class="json-box"></pre>
+          </section>
+        </section>
+
+        <section id="page-query" class="page">
+          <div class="page-head">
+            <h2>检索问答</h2>
+          </div>
+          <section class="panel">
+            <form id="queryForm" class="query-grid">
+              <label class="question-box">
+                问题
+                <textarea name="question" rows="5" required></textarea>
+              </label>
+              <div class="control-stack">
+                <label>
+                  检索模式
+                  <select name="retrieval_mode" id="retrievalMode">
+                    <option value="all_available">全部可用索引</option>
+                    <option value="fast_local">本地快速</option>
+                    <option value="private_local_only">仅本地私有</option>
+                    <option value="api_only">仅 API</option>
+                    <option value="strict_exhaustive">严格穷尽</option>
+                  </select>
+                </label>
+                <label>
+                  分析模型
+                  <select name="analysis_model" id="analysisModel">
+                    <option value="auto">自动</option>
+                    <option value="local_llm">本地 LLM / 抽取式</option>
+                    <option value="api_llm">API LLM</option>
+                  </select>
+                </label>
+                <label>
+                  领域筛选
+                  <select name="domain">
+                    <option value="paper">论文</option>
+                    <option value="">全部</option>
+                    <option value="chat">对话</option>
+                    <option value="image">图片</option>
+                    <option value="doc">文档</option>
+                    <option value="project">项目</option>
+                    <option value="note">笔记</option>
+                    <option value="misc">其他</option>
+                  </select>
+                </label>
+                <label>
+                  敏感级别筛选
+                  <select name="sensitivity" id="sensitivityFilter">
+                    <option value="public">公开</option>
+                    <option value="private">私有</option>
+                    <option value="confidential">机密</option>
+                    <option value="">全部</option>
+                  </select>
+                </label>
+                <label>
+                  返回数量
+                  <input type="number" name="top_k" value="8" min="1" max="40" />
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" name="allow_private_api" />
+                  允许私有内容使用 API
+                </label>
+                <div id="apiPolicy" class="policy-box">API 策略待检查</div>
+                <button type="submit">运行检索</button>
+              </div>
+            </form>
+          </section>
+          <section class="panel">
+            <h3>回答</h3>
+            <pre id="answerBox" class="answer-box"></pre>
+          </section>
+          <section class="panel">
+            <h3>证据</h3>
+            <div id="evidenceList"></div>
+          </section>
+        </section>
+
+
+        <section id="page-literature" class="page">
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">发现 → DOI → 摘要语言</p>
+              <h2>收集资料</h2>
+            </div>
+          </div>
+          <div class="mode-tabs" role="tablist" aria-label="收集方式">
+            <button type="button" class="nav-item mode-tab" data-page="upload">本地导入</button>
+            <button type="button" class="nav-item mode-tab active" data-page="literature">文献发现</button>
+            <button type="button" class="nav-item mode-tab" data-page="doi">DOI 下载</button>
+          </div>
+          <section class="panel">
+            <form id="literatureForm" class="query-grid">
+              <label class="question-box">
+                主题 / 关键词
+                <textarea name="query" rows="6" placeholder="例如：面向生物医学文献的多模态 RAG" required></textarea>
+              </label>
+              <div class="control-stack">
+                <label>
+                  附加关键词
+                  <textarea name="keywords" rows="3" placeholder="每行或逗号分隔：评估, 引用对齐"></textarea>
+                </label>
+                <label>
+                  期刊 / ISSN 限制
+                  <textarea name="journals" rows="3" placeholder="例如：Nature, Science, Cell, 1476-4687"></textarea>
+                </label>
+                <div class="inline-fields">
+                  <label>
+                    起始年份
+                    <input name="year_from" type="number" min="1600" max="2200" placeholder="2020" />
+                  </label>
+                  <label>
+                    结束年份
+                    <input name="year_to" type="number" min="1600" max="2200" placeholder="2026" />
+                  </label>
+                </div>
+                <label>
+                  返回篇数
+                  <input name="max_results" type="number" value="8" min="1" max="20" />
+                </label>
+                <label>
+                  语言显示
+                  <select name="language_mode">
+                    <option value="bilingual">中英双语</option>
+                    <option value="zh">中文</option>
+                    <option value="en">英文</option>
+                  </select>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" name="translate" checked />
+                  使用本地翻译端点
+                </label>
+                <button type="submit">查找文章</button>
+              </div>
+            </form>
+          </section>
+          <section class="panel">
+            <h3>发现状态</h3>
+            <div id="literatureStatus" class="policy-box">等待查询</div>
+          </section>
+          <section class="panel">
+            <h3>候选文章</h3>
+            <div id="literatureResults"></div>
+          </section>
+        </section>
+
+        <section id="page-doi" class="page">
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">授权访问 → 下载 PDF → 可选入库</p>
+              <h2>收集资料</h2>
+            </div>
+            <button id="refreshDoiDownloads" class="secondary">刷新</button>
+          </div>
+          <div class="mode-tabs" role="tablist" aria-label="收集方式">
+            <button type="button" class="nav-item mode-tab" data-page="upload">本地导入</button>
+            <button type="button" class="nav-item mode-tab" data-page="literature">文献发现</button>
+            <button type="button" class="nav-item mode-tab active" data-page="doi">DOI 下载</button>
+          </div>
+          <section class="panel">
+            <div class="policy-box warn">
+              本工具只会下载你明确提供 DOI 且你有权限访问的文章。不支持绕过登录、验证码、付费墙或机构限制。遇到访问警告、403、429、CAPTCHA 时会停止。
+            </div>
+          </section>
+          <section class="panel">
+            <form id="doiForm" class="query-grid">
+              <label class="question-box">
+                DOI 列表
+                <textarea name="doi_text" rows="8" placeholder="10.xxxx/yyyy&#10;https://doi.org/10.xxxx/yyyy" required></textarea>
+              </label>
+              <div class="control-stack">
+                <label>
+                  保存目录
+                  <input name="out_dir" placeholder="data/raw/papers" />
+                </label>
+                <label>
+                  最大篇数
+                  <input name="max_items" type="number" value="10" min="1" max="20" />
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" name="headed" />
+                  需要登录时打开浏览器
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" name="allow_manual_login" />
+                  允许手动登录等待
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" name="fast_mode" />
+                  快速模式
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" name="auto_ingest" />
+                  加入文档库
+                </label>
+                <button type="submit">开始下载</button>
+                <button id="clearDoiProfile" type="button" class="secondary">清除下载器浏览器登录状态</button>
+              </div>
+            </form>
+          </section>
+          <section class="panel">
+            <h3>下载器状态</h3>
+            <pre id="doiStatus" class="json-box"></pre>
+          </section>
+          <section class="panel">
+            <h3>本次结果</h3>
+            <pre id="doiResult" class="json-box"></pre>
+          </section>
+          <section class="panel">
+            <h3>下载日志</h3>
+            <div id="doiJobsTable"></div>
+            <div id="doiItemsTable"></div>
+          </section>
+        </section>
+
+        <section id="page-sources" class="page">
+          <div class="page-head">
+            <h2>文档库</h2>
+            <button id="refreshSources" class="secondary">刷新</button>
+          </div>
+          <section class="panel">
+            <div id="sourcesTable"></div>
+          </section>
+          <section class="panel">
+            <h3>文本块</h3>
+            <div id="chunksTable"></div>
+          </section>
+        </section>
+
+        <section id="page-processing" class="page">
+          <div class="page-head">
+            <h2>处理状态</h2>
+            <button id="refreshProcessing" class="secondary">刷新</button>
+          </div>
+          <section class="panel">
+            <div id="processingTable"></div>
+          </section>
+          <section class="panel">
+            <h3>处理错误</h3>
+            <div id="processingErrors"></div>
+          </section>
+        </section>
+
+        <section id="page-audits" class="page">
+          <div class="page-head">
+            <h2>检索审计</h2>
+            <button id="refreshAudits" class="secondary">刷新</button>
+          </div>
+          <section class="panel">
+            <div id="auditsTable"></div>
+          </section>
+          <section class="panel">
+            <h3>审计详情 / 修复</h3>
+            <div class="form-grid">
+              <label>
+                审计 ID
+                <input id="auditDetailId" placeholder="aud_..." />
+              </label>
+              <label class="span-2">
+                预期行为
+                <input id="auditExpectedBehavior" placeholder="例如：某篇论文应被检索到但没有出现" />
+              </label>
+              <button id="loadAuditDetail" class="secondary">查看详情</button>
+              <button id="generateAuditRepair" class="secondary">生成修复指导</button>
+            </div>
+            <pre id="auditDetailBox" class="json-box"></pre>
+          </section>
+        </section>
+
+        <section id="page-pdf" class="page">
+          <div class="page-head">
+            <h2>PDF 阅读器</h2>
+          </div>
+          <section class="panel">
+            <form id="pdfForm" class="form-grid">
+              <label class="span-2">
+                来源 ID
+                <input name="source_id" placeholder="src_..." required />
+              </label>
+              <label>
+                页码
+                <input name="page" type="number" value="1" min="1" />
+              </label>
+              <button type="submit">打开 PDF</button>
+            </form>
+          </section>
+        </section>
+
+        <section id="page-outputs" class="page">
+          <div class="page-head">
+            <h2>Markdown 输出工作台</h2>
+            <button id="refreshOutputs" class="secondary">刷新</button>
+          </div>
+          <section class="panel">
+            <form id="outputForm" class="query-grid">
+              <label class="question-box">
+                任务 / 问题
+                <textarea name="question" rows="5" required></textarea>
+              </label>
+              <div class="control-stack">
+                <label>
+                  输出类型
+                  <select name="output_type">
+                    <option value="research_summary">研究摘要 (research_summary.md)</option>
+                    <option value="literature_review">文献综述 (literature_review.md)</option>
+                    <option value="comparison_matrix">对比矩阵 (comparison_matrix.md)</option>
+                    <option value="source_grounded_report">证据报告 (source_grounded_report.md)</option>
+                    <option value="mindmap_outline">思维导图大纲 (mindmap_outline.md)</option>
+                    <option value="presentation_guidance">汇报材料指导 (presentation_guidance.md)</option>
+                    <option value="presentation_codex_execution_guidance">汇报执行指导 (presentation_codex_execution_guidance.md)</option>
+                    <option value="presentation_codex_prompt">汇报 Codex 提示词 (presentation_codex_prompt.md)</option>
+                    <option value="project_repair_guidance">项目修复指导 (project_repair_guidance.md)</option>
+                    <option value="project_next_step_guidance">项目下一步指导 (project_next_step_guidance.md)</option>
+                  </select>
+                </label>
+                <label>
+                  检索模式
+                  <select name="retrieval_mode">
+                    <option value="all_available">全部可用索引</option>
+                    <option value="strict_exhaustive">严格穷尽</option>
+                    <option value="fast_local">本地快速</option>
+                  </select>
+                </label>
+                <label>
+                  返回数量
+                  <input type="number" name="top_k" value="8" min="1" max="40" />
+                </label>
+                <button type="submit">生成 Markdown</button>
+              </div>
+            </form>
+          </section>
+          <section class="panel">
+            <h3>生成结果</h3>
+            <pre id="outputResult" class="json-box"></pre>
+          </section>
+          <section class="panel">
+            <h3>历史输出</h3>
+            <div id="outputsTable"></div>
+          </section>
+        </section>
+
+        <section id="page-maintenance" class="page">
+          <div class="page-head">
+            <h2>维护中心</h2>
+            <button id="refreshCoverage" class="secondary">刷新</button>
+          </div>
+          <section class="panel">
+            <div class="toolbar">
+              <button data-rebuild="local_hash_embedding_v1">构建本地向量</button>
+              <button data-rebuild="bm25_v1">重建 BM25</button>
+              <button data-rebuild="graph_entities_v1">重建图谱</button>
+              <button data-rebuild="api_text_embedding_3_large_v1">构建 API 向量</button>
+              <label class="check-row">
+                <input type="checkbox" id="includePrivateApi" />
+                包含私有内容 API
+              </label>
+              <button id="backupDb" class="secondary">备份 DB</button>
+            </div>
+            <pre id="maintenanceResult" class="json-box"></pre>
+          </section>
+          <section class="panel">
+            <h3>覆盖详情</h3>
+            <div id="coverageDetail"></div>
+          </section>
+          <section class="panel">
+            <h3>健康报告</h3>
+            <div class="toolbar">
+              <button id="maintenanceReport" class="secondary">一键健康检查</button>
+              <button id="codexRepairTask" class="secondary">生成 Codex 修复任务</button>
+            </div>
+            <pre id="maintenanceReportBox" class="json-box"></pre>
+          </section>
+        </section>
+
+        <section id="page-settings" class="page">
+          <div class="page-head">
+            <h2>设置</h2>
+          </div>
+          <section class="panel">
+            <h3>本地 LLM / Gemma4</h3>
+            <p class="muted">默认读取 `.env` 中的 `LOCAL_LLM_BASE_URL` / `GEMMA4_OPENAI_BASE_URL` 和 `LOCAL_LLM_MODEL` / `GEMMA4_MODEL`。未配置时，Markdown 输出会自动使用可靠的骨架式备用输出。</p>
+            <div class="toolbar">
+              <button id="checkLocalLlm" class="secondary">诊断本地 LLM</button>
+            </div>
+            <pre id="localLlmStatus" class="json-box"></pre>
+          </section>
+        </section>
+
+        <section id="page-compare" class="page">
+          <div class="page-head">
+            <h2>评估对比</h2>
+          </div>
+          <section class="panel">
+            <form id="compareForm" class="form-grid">
+              <label class="span-3">
+                问题
+                <textarea name="question" rows="4" required></textarea>
+              </label>
+              <label>
+                领域
+                <select name="domain">
+                  <option value="paper">论文</option>
+                  <option value="">全部</option>
+                </select>
+              </label>
+              <label>
+                敏感级别
+                <select name="sensitivity">
+                  <option value="public">公开</option>
+                  <option value="">全部</option>
+                </select>
+              </label>
+              <label>
+                返回数量
+                <input type="number" name="top_k" value="8" min="1" max="40" />
+              </label>
+              <button type="submit">运行对比</button>
+            </form>
+          </section>
+          <section class="panel">
+            <h3>评估结果</h3>
+            <pre id="compareResult" class="json-box"></pre>
+          </section>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
