@@ -21,3 +21,45 @@ bd prime                # Refresh Beads context
 - Run `bd prime` when Beads context is missing or stale.
 - Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
 <!-- END BEADS CODEX SETUP -->
+
+## Default Codex Task Isolation
+
+The user wants future Codex windows to focus on the task request itself. Do not require the user to repeat branch, worktree, or Beads setup instructions in each prompt.
+
+### Coordination Root
+
+Use this checkout as the project coordination root:
+
+```text
+/Users/maber2k/Documents/Codex/personal-knowledge-rag-webapp
+```
+
+Run Beads commands from this root, or with `bd -C /Users/maber2k/Documents/Codex/personal-knowledge-rag-webapp ...`, even after code work moves into a separate git worktree. This keeps all Codex windows sharing one task tracker instead of each worktree creating its own local Beads state.
+
+The `.beads/` directory is local coordination state and is ignored by git in this project. Do not force-add or publish `.beads/`; use it locally for task claiming/status and keep source changes separate.
+
+### Default Start For Coding Tasks
+
+For any non-trivial coding, UI, feature, refactor, migration, test, or multi-file task:
+
+1. Run the project bootstrap and inspect `git status -sb`, remotes, upstream branch, and Beads state.
+2. If the prompt names a Beads issue, inspect and claim that issue before editing.
+3. If no Beads issue is named and the task is more than a tiny one-off, create a Beads issue with a short title and useful description, then claim it.
+4. Create or reuse a dedicated branch named `codex/<issue-id>-short-slug`.
+5. Create or reuse a sibling git worktree named `../personal-knowledge-rag-webapp-<issue-id>-short-slug`.
+6. Continue all source edits, build commands, tests, browser checks, and commits from that task worktree.
+7. Leave the coordination root clean except for coordination-only files or explicit maintenance tasks.
+
+### Parallel Work Boundaries
+
+- If two tasks need the same core file, component, schema, route, state store, or API contract, prefer serial work or create a small contract/integration task first.
+- For feature plus UI parallelism, establish the data/API/type contract first; then keep the feature worktree on data/API/tests and the UI worktree on presentation/interaction states.
+- Do not let a UI task invent backend fields or a backend task casually redesign UI surfaces.
+- Use separate dev-server ports, temporary data, and browser profiles/local storage when two worktrees need to run at the same time.
+- Treat database migrations, destructive scripts, production data, authentication, and account/security flows as shared resources; stop and ask before doing anything irreversible.
+
+### Exceptions
+
+- Read-only questions, code review without edits, status checks, and tiny documentation-only edits may stay in the current checkout after checking status.
+- Integration, merge, rebase, release, or hotfix tasks should use the branch/worktree appropriate to that operation.
+- If worktree creation fails or the current checkout has user changes that affect the task, explain the blocker and choose the safest path instead of silently working in a shared dirty tree.
