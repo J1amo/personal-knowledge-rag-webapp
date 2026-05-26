@@ -73,6 +73,7 @@ LaunchAgent 使用 `scripts/run_server.sh` 前台运行服务，`RunAtLoad=true`
 - `检索审计`: 查看 query、backends、merged results、dropped duplicates、citations、warnings，并能展开 audit detail、生成 Codex 修复指导。
 - `PDF 阅读器`: 通过 source_id 打开原始 PDF，使用本地 PDF.js 渲染并跳转页面；chunk/citation 可做页级 focus。
 - `Markdown 输出工作台`: 生成 research summary、literature review、presentation guidance、Codex prompt 等 `.md` 文件。
+- `Research`: 管理研究项目、项目资料范围和可插拔 research pack 输出；首个 pack 为 `research_packs/gaa_vertical/`。
 - `Maintenance / 维护中心`: 查看 index coverage、健康报告、missing/stale/failed chunks，触发索引重建、备份 DB、生成 Codex 修复任务。
 - `Compare / Evaluation`: 对 Fast Local、API Only、All Available、Strict Exhaustive 做命中和重叠比较。
 
@@ -112,6 +113,9 @@ db/knowledge.sqlite
 - `ingestion_jobs`
 - `processing_errors`
 - `markdown_outputs`
+- `research_projects`
+- `project_sources`
+- `research_packs`
 - `local_llm_runs`
 - `doi_download_jobs`
 - `doi_download_items`
@@ -120,6 +124,18 @@ db/knowledge.sqlite
 原始文件是最高级别证据，系统不会自动删除 raw files。`.gitignore` 已排除 `.env`、`data/raw/`、`db/`、`indexes/`、`cache/`、`backups/`。
 
 Markdown 输出默认写入 `outputs/`，该目录也被 `.gitignore` 排除，因为输出可能包含私有资料片段。
+
+## Research Workspace / Packs
+
+Research workspace 在通用资料库之上增加项目边界：同一篇 source 可以加入多个 research project，检索时通过已有 `source_ids` filter 限定项目资料范围，不复制 raw files，也不把领域字段写入 `sources` 或 `chunks`。
+
+首个领域包位于：
+
+```text
+research_packs/gaa_vertical/
+```
+
+该 pack 保存 GAA vertical 方向的 ontology、输出模板和低难度第一步 proposal 模板。通用 core 仍只负责 ingestion、chunk、index、retrieval、citation、audit 和隐私边界。
 
 DOI 下载日志默认写入 `outputs/doi_download_logs/`，下载器浏览器 profile 默认写入 `cache/browser_profiles/doi_downloader/`。二者都不应提交。
 

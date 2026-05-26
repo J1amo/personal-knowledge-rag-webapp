@@ -390,6 +390,14 @@ button.secondary,
 .mode-tab {
   min-width: 96px;
   background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.mode-tab.active {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-dark);
 }
 
 .main {
@@ -462,6 +470,19 @@ button.secondary,
   grid-template-columns: repeat(4, minmax(160px, 1fr));
   gap: 14px;
   align-items: end;
+}
+
+.research-project-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.research-project-form .span-2,
+.research-project-form .span-3 {
+  grid-column: span 2;
+}
+
+.research-project-form button {
+  justify-self: start;
 }
 
 .import-form {

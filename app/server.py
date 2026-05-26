@@ -36,7 +36,22 @@ from .maintenance import (
     source_chunks,
     update_source_metadata,
 )
-from .output_studio import check_local_llm, generate_markdown_output, list_markdown_outputs
+from .output_studio import (
+    check_local_llm,
+    generate_markdown_output,
+    generate_project_markdown_output,
+    list_available_output_types,
+    list_markdown_outputs,
+)
+from .research_packs import list_packs, load_pack
+from .research_projects import (
+    add_source_to_project,
+    answer_query_for_project,
+    create_project,
+    list_project_sources,
+    list_projects,
+    remove_source_from_project,
+)
 from .retrieval import answer_query, compare_modes
 
 STATIC_DIR = config.PROJECT_ROOT / "static"
@@ -141,6 +156,31 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"outputs": list_markdown_outputs()})
             elif path == "/api/local-llm/status":
                 self._send_json(check_local_llm())
+            elif path == "/api/research/projects":
+                self._send_json({"projects": list_projects()})
+            elif path == "/api/research/project/sources":
+                qs = parse_qs(parsed.query)
+                project_id = (qs.get("project_id") or [""])[0]
+                if not project_id:
+                    raise JsonError(400, "project_id is required")
+                self._send_json({"sources": list_project_sources(project_id)})
+            elif path == "/api/research/packs":
+                self._send_json({"packs": list_packs()})
+            elif path == "/api/research/pack":
+                qs = parse_qs(parsed.query)
+                pack_id = (qs.get("pack_id") or [""])[0]
+                if not pack_id:
+                    raise JsonError(400, "pack_id is required")
+                try:
+                    self._send_json(load_pack(pack_id))
+                except FileNotFoundError as exc:
+                    raise JsonError(404, str(exc)) from exc
+                except (KeyError, ValueError) as exc:
+                    raise JsonError(400, str(exc)) from exc
+            elif path == "/api/research/output-types":
+                qs = parse_qs(parsed.query)
+                project_id = (qs.get("project_id") or [""])[0] or None
+                self._send_json({"output_types": list_available_output_types(project_id)})
             elif path == "/api/doi-downloader/status":
                 self._send_json(doi_downloader_status())
             elif path == "/api/doi-downloads":
@@ -261,6 +301,79 @@ class Handler(BaseHTTPRequestHandler):
                         translate=bool(payload.get("translate", True)),
                     )
                 )
+            elif path == "/api/research/projects":
+                payload = self._read_json()
+                try:
+                    result = create_project(
+                        name=payload.get("name") or "",
+                        description=payload.get("description") or "",
+                        pack_id=payload.get("pack_id") or None,
+                        default_filters=payload.get("default_filters") or None,
+                        metadata=payload.get("metadata") or None,
+                    )
+                except ValueError as exc:
+                    raise JsonError(400, str(exc)) from exc
+                self._send_json(result)
+            elif path == "/api/research/project/sources/add":
+                payload = self._read_json()
+                try:
+                    result = add_source_to_project(
+                        payload.get("project_id") or "",
+                        payload.get("source_id") or "",
+                        role=payload.get("role") or "reference",
+                        tags=payload.get("tags") or [],
+                        notes=payload.get("notes") or "",
+                        relevance_score=payload.get("relevance_score"),
+                    )
+                except ValueError as exc:
+                    raise JsonError(400, str(exc)) from exc
+                self._send_json(result)
+            elif path == "/api/research/project/sources/remove":
+                payload = self._read_json()
+                project_id = payload.get("project_id") or ""
+                source_id = payload.get("source_id") or ""
+                if not project_id or not source_id:
+                    raise JsonError(400, "project_id and source_id are required")
+                self._send_json(remove_source_from_project(project_id, source_id))
+            elif path == "/api/research/query":
+                payload = self._read_json()
+                question = (payload.get("question") or "").strip()
+                project_id = payload.get("project_id") or ""
+                if not project_id:
+                    raise JsonError(400, "project_id is required")
+                if not question:
+                    raise JsonError(400, "question is required")
+                try:
+                    result = answer_query_for_project(
+                        project_id,
+                        question,
+                        retrieval_mode=payload.get("retrieval_mode") or "all_available",
+                        analysis_model=payload.get("analysis_model") or "auto",
+                        top_k=int(payload.get("top_k") or 10),
+                        allow_private_api=bool(payload.get("allow_private_api")),
+                        filters=payload.get("filters") or {},
+                    )
+                except ValueError as exc:
+                    raise JsonError(400, str(exc)) from exc
+                self._send_json(result)
+            elif path == "/api/research/output/generate":
+                payload = self._read_json()
+                project_id = payload.get("project_id") or ""
+                if not project_id:
+                    raise JsonError(400, "project_id is required")
+                try:
+                    result = generate_project_markdown_output(
+                        project_id=project_id,
+                        output_type=payload.get("output_type") or "research_summary",
+                        question=payload.get("question") or "",
+                        title=payload.get("title") or None,
+                        retrieval_mode=payload.get("retrieval_mode") or "all_available",
+                        top_k=int(payload.get("top_k") or 10),
+                        llm_backend=payload.get("llm_backend") or "gemma4",
+                    )
+                except ValueError as exc:
+                    raise JsonError(400, str(exc)) from exc
+                self._send_json(result)
             elif path == "/api/outputs/generate":
                 payload = self._read_json()
                 self._send_json(

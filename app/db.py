@@ -298,6 +298,48 @@ def init_db() -> None:
               updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS research_projects (
+              project_id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              description TEXT,
+              pack_id TEXT,
+              default_filters_json TEXT NOT NULL DEFAULT '{}',
+              privacy_policy TEXT NOT NULL DEFAULT 'inherit_source',
+              status TEXT NOT NULL DEFAULT 'active',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_research_projects_status
+              ON research_projects(status, updated_at);
+
+            CREATE TABLE IF NOT EXISTS project_sources (
+              project_id TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              role TEXT NOT NULL DEFAULT 'reference',
+              tags_json TEXT NOT NULL DEFAULT '[]',
+              relevance_score REAL,
+              notes TEXT,
+              added_at TEXT NOT NULL,
+              PRIMARY KEY(project_id, source_id),
+              FOREIGN KEY(project_id) REFERENCES research_projects(project_id) ON DELETE CASCADE,
+              FOREIGN KEY(source_id) REFERENCES sources(source_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_project_sources_source
+              ON project_sources(source_id, project_id);
+
+            CREATE TABLE IF NOT EXISTS research_packs (
+              pack_id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              version TEXT NOT NULL,
+              manifest_json TEXT NOT NULL DEFAULT '{}',
+              enabled INTEGER NOT NULL DEFAULT 1,
+              installed_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS local_llm_runs (
               run_id TEXT PRIMARY KEY,
               backend TEXT NOT NULL,

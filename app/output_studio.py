@@ -273,35 +273,65 @@ def _call_gemma4(prompt: str, evidence: list[dict[str, Any]]) -> tuple[str | Non
         }
 
 
-def generate_markdown_output(
+def _pack_scaffold(
     *,
     output_type: str,
+    title: str,
     question: str,
-    title: str | None = None,
-    retrieval_mode: str = "all_available",
-    filters: dict[str, Any] | None = None,
-    top_k: int = 10,
-    llm_backend: str = "gemma4",
+    template_markdown: str,
+    evidence: list[dict[str, Any]],
+    retrieval_meta: dict[str, Any],
+) -> str:
+    generated_at = utc_now()
+    evidence_rows = ["| # | Source | Page | Found By | Evidence |", "|---|---|---|---|---|"]
+    for idx, item in enumerate(evidence, start=1):
+        page = item.get("page_number") or "unknown"
+        found_by = ", ".join(item.get("found_by", []))
+        evidence_rows.append(
+            f"| {idx} | {item['original_filename']} | {page} | {found_by} | {_clip(item.get('text', ''), 260)} |"
+        )
+    if len(evidence_rows) == 2:
+        evidence_rows.append("| - | No retrieved source | - | - | Add project sources or rebuild indexes. |")
+    return f"""# {title}
+
+## 1. Generation Context
+- Output type: `{output_type}`
+- Generation time: {generated_at}
+- Question / task: {question or "未提供"}
+- Retrieval mode: {retrieval_meta.get("retrieval_mode")}
+- Evidence count: {len(evidence)}
+
+## 2. Pack Template
+{template_markdown.strip()}
+
+## 3. Source Scope / Evidence Table
+{chr(10).join(evidence_rows)}
+
+## 4. Unsupported Claims
+- Any statement not tied to the evidence table must stay marked as `[无直接来源，需人工确认]`.
+
+## 5. Next Verification
+- Check whether the project source set is complete.
+- Accept, reject, or revise any unsupported claim before sharing this output.
+
+## 6. Export Metadata
+```json
+{json.dumps({"output_type": output_type, "generated_at": generated_at, "evidence_chunk_ids": [item["chunk_id"] for item in evidence]}, ensure_ascii=False, indent=2)}
+```
+"""
+
+
+def _persist_markdown_output(
+    *,
+    output_type: str,
+    title: str,
+    question: str,
+    content: str,
+    prompt: str,
+    evidence: list[dict[str, Any]],
+    retrieval: dict[str, Any],
+    llm_meta: dict[str, Any],
 ) -> dict[str, Any]:
-    init_db()
-    if output_type not in OUTPUT_TYPES:
-        raise ValueError(f"Unsupported output_type: {output_type}")
-    title = title or OUTPUT_TYPES[output_type]
-    retrieval = retrieve(question or title, retrieval_mode=retrieval_mode, filters=filters or {}, top_k=top_k)
-    evidence = retrieval["evidence"]
-    scaffold = deterministic_scaffold(
-        output_type=output_type,
-        title=title,
-        question=question,
-        evidence=evidence,
-        retrieval_meta=retrieval,
-    )
-    prompt = scaffold
-    llm_content = None
-    llm_meta = {"backend": llm_backend, "model": llm_backend, "status": "skipped", "error": None}
-    if llm_backend == "gemma4":
-        llm_content, llm_meta = _call_gemma4(prompt, evidence)
-    content = llm_content or scaffold
     output_id = "out_" + uuid.uuid4().hex
     output_dir = config.OUTPUT_DIR / output_type
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -382,6 +412,149 @@ def generate_markdown_output(
             "merged_count": retrieval.get("merged_count"),
         },
     }
+
+
+def generate_markdown_output(
+    *,
+    output_type: str,
+    question: str,
+    title: str | None = None,
+    retrieval_mode: str = "all_available",
+    filters: dict[str, Any] | None = None,
+    top_k: int = 10,
+    llm_backend: str = "gemma4",
+) -> dict[str, Any]:
+    init_db()
+    if output_type not in OUTPUT_TYPES:
+        raise ValueError(f"Unsupported output_type: {output_type}")
+    title = title or OUTPUT_TYPES[output_type]
+    retrieval = retrieve(question or title, retrieval_mode=retrieval_mode, filters=filters or {}, top_k=top_k)
+    evidence = retrieval["evidence"]
+    scaffold = deterministic_scaffold(
+        output_type=output_type,
+        title=title,
+        question=question,
+        evidence=evidence,
+        retrieval_meta=retrieval,
+    )
+    prompt = scaffold
+    llm_content = None
+    llm_meta = {"backend": llm_backend, "model": llm_backend, "status": "skipped", "error": None}
+    if llm_backend == "gemma4":
+        llm_content, llm_meta = _call_gemma4(prompt, evidence)
+    content = llm_content or scaffold
+    return _persist_markdown_output(
+        output_type=output_type,
+        title=title,
+        question=question,
+        content=content,
+        prompt=prompt,
+        evidence=evidence,
+        retrieval=retrieval,
+        llm_meta=llm_meta,
+    )
+
+
+def list_available_output_types(project_id: str | None = None) -> list[dict[str, str]]:
+    output_types = [
+        {"output_type": output_type, "title": title, "source": "core"}
+        for output_type, title in OUTPUT_TYPES.items()
+    ]
+    if not project_id:
+        return output_types
+    from .research_packs import list_pack_templates
+    from .research_projects import get_project
+
+    project = get_project(project_id)
+    if not project or not project.get("pack_id"):
+        return output_types
+    try:
+        templates = list_pack_templates(project["pack_id"])
+    except Exception:
+        return output_types
+    output_types.extend(
+        {
+            "output_type": template["output_type"],
+            "title": template["title"],
+            "source": "pack",
+        }
+        for template in templates.values()
+    )
+    return output_types
+
+
+def generate_project_markdown_output(
+    *,
+    project_id: str,
+    output_type: str,
+    question: str,
+    title: str | None = None,
+    retrieval_mode: str = "all_available",
+    top_k: int = 10,
+    llm_backend: str = "gemma4",
+) -> dict[str, Any]:
+    init_db()
+    from .research_packs import list_pack_templates, load_pack_template
+    from .research_projects import get_project, retrieve_for_project
+
+    project = get_project(project_id)
+    if not project:
+        raise ValueError("Project not found")
+    pack_templates = {}
+    if project.get("pack_id"):
+        try:
+            pack_templates = list_pack_templates(project["pack_id"])
+        except Exception:
+            if output_type not in OUTPUT_TYPES:
+                raise
+    is_core_output = output_type in OUTPUT_TYPES
+    is_pack_output = output_type in pack_templates
+    if not is_core_output and not is_pack_output:
+        raise ValueError(f"Unsupported output_type for project: {output_type}")
+
+    title = title or (OUTPUT_TYPES.get(output_type) if is_core_output else pack_templates[output_type]["title"])
+    retrieval = retrieve_for_project(
+        project_id,
+        question or title,
+        retrieval_mode=retrieval_mode,
+        top_k=top_k,
+    )
+    evidence = retrieval["evidence"]
+    if is_core_output:
+        scaffold = deterministic_scaffold(
+            output_type=output_type,
+            title=title,
+            question=question,
+            evidence=evidence,
+            retrieval_meta=retrieval,
+        )
+    else:
+        scaffold = _pack_scaffold(
+            output_type=output_type,
+            title=title,
+            question=question,
+            template_markdown=load_pack_template(project["pack_id"], output_type),
+            evidence=evidence,
+            retrieval_meta=retrieval,
+        )
+    prompt = scaffold
+    llm_content = None
+    llm_meta = {"backend": llm_backend, "model": llm_backend, "status": "skipped", "error": None}
+    if llm_backend == "gemma4":
+        llm_content, llm_meta = _call_gemma4(prompt, evidence)
+    result = _persist_markdown_output(
+        output_type=output_type,
+        title=title,
+        question=question,
+        content=llm_content or scaffold,
+        prompt=prompt,
+        evidence=evidence,
+        retrieval=retrieval,
+        llm_meta=llm_meta,
+    )
+    result["project_id"] = project_id
+    result["pack_id"] = project.get("pack_id")
+    return result
 
 
 def list_markdown_outputs(limit: int = 50) -> list[dict[str, Any]]:

@@ -29,6 +29,7 @@ class StaticUiContractTest(unittest.TestCase):
             "audits",
             "pdf",
             "compare",
+            "research",
             "outputs",
             "maintenance",
             "settings",
@@ -132,6 +133,7 @@ class StaticUiContractTest(unittest.TestCase):
         for branch, landing_page in {
             "collect": "upload",
             "retrieve": "query",
+            "research": "research",
             "publish": "outputs",
             "maintain": "maintenance",
         }.items():
@@ -143,6 +145,17 @@ class StaticUiContractTest(unittest.TestCase):
         css = (self.root / "static" / "styles.css").read_text(encoding="utf-8")
         self.assertIn(".page {\n  display: none;\n  width: 100%;\n  max-width: none;", css)
         self.assertNotIn("max-width: 1360px", css)
+
+    def test_research_workspace_surface_exists(self) -> None:
+        html = (self.root / "static" / "index.html").read_text(encoding="utf-8")
+        app_js = (self.root / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="page-research"', html)
+        self.assertIn('id="researchProjectForm"', html)
+        self.assertIn('id="researchSourceForm"', html)
+        self.assertIn('id="researchOutputForm"', html)
+        self.assertIn("/api/research/projects", app_js)
+        self.assertIn("/api/research/project/sources/add", app_js)
+        self.assertIn("/api/research/output/generate", app_js)
 
 
 if __name__ == "__main__":

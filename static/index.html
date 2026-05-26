@@ -34,8 +34,9 @@
           <button class="nav-item flow-step active" data-page="dashboard" data-branch="dashboard"><span>00</span><strong>工作台</strong><small>状态总览</small></button>
           <button class="nav-item flow-step" data-page="collect" data-branch="collect"><span>01</span><strong>收集</strong><small>发现 / 导入 / 入库</small></button>
           <button class="nav-item flow-step" data-page="retrieve" data-branch="retrieve"><span>02</span><strong>检索</strong><small>问答 / 审计 / 定位</small></button>
-          <button class="nav-item flow-step" data-page="publish" data-branch="publish"><span>03</span><strong>输出</strong><small>Markdown</small></button>
-          <button class="nav-item flow-step" data-page="maintain" data-branch="maintain"><span>04</span><strong>维护</strong><small>索引 / 设置</small></button>
+          <button class="nav-item flow-step" data-page="research" data-branch="research"><span>03</span><strong>Research</strong><small>项目 / Pack</small></button>
+          <button class="nav-item flow-step" data-page="publish" data-branch="publish"><span>04</span><strong>输出</strong><small>Markdown</small></button>
+          <button class="nav-item flow-step" data-page="maintain" data-branch="maintain"><span>05</span><strong>维护</strong><small>索引 / 设置</small></button>
         </nav>
 
         <nav class="nav branch-nav" aria-label="分支工具" hidden>
@@ -500,6 +501,97 @@
           <section class="panel">
             <h3>历史输出</h3>
             <div id="outputsTable"></div>
+          </section>
+        </section>
+
+        <section id="page-research" class="page">
+          <div class="page-head">
+            <h2>Research 工作台</h2>
+            <button id="refreshResearch" class="secondary">刷新</button>
+          </div>
+          <div class="mode-tabs" role="tablist" aria-label="Research 工作区">
+            <button type="button" class="mode-tab research-tab active" data-research-panel="projects">Projects</button>
+            <button type="button" class="mode-tab research-tab" data-research-panel="sources">Sources</button>
+            <button type="button" class="mode-tab research-tab" data-research-panel="outputs">Outputs</button>
+          </div>
+
+          <section class="panel research-panel active" data-research-panel-view="projects">
+            <div class="layout-two">
+              <form id="researchProjectForm" class="form-grid research-project-form">
+                <label class="span-2">
+                  Project name
+                  <input name="name" required />
+                </label>
+                <label>
+                  Pack
+                  <select name="pack_id" id="researchPackSelect"></select>
+                </label>
+                <label class="span-3">
+                  Description
+                  <input name="description" />
+                </label>
+                <button type="submit">创建</button>
+              </form>
+              <div>
+                <label>
+                  当前 Project
+                  <select id="researchProjectSelect"></select>
+                </label>
+                <pre id="researchProjectDetail" class="json-box"></pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel research-panel" data-research-panel-view="sources" hidden>
+            <form id="researchSourceForm" class="form-grid">
+              <label class="span-2">
+                Source
+                <select name="source_id" id="researchSourceSelect"></select>
+              </label>
+              <label>
+                Role
+                <select name="role">
+                  <option value="reference">reference</option>
+                  <option value="core_paper">core_paper</option>
+                  <option value="review">review</option>
+                  <option value="method">method</option>
+                  <option value="benchmark">benchmark</option>
+                  <option value="background">background</option>
+                  <option value="note">note</option>
+                </select>
+              </label>
+              <button type="submit">加入 Project</button>
+            </form>
+            <div id="researchSourcesTable"></div>
+          </section>
+
+          <section class="panel research-panel" data-research-panel-view="outputs" hidden>
+            <form id="researchOutputForm" class="query-grid">
+              <label class="question-box">
+                任务 / 问题
+                <textarea name="question" rows="5" required></textarea>
+              </label>
+              <div class="control-stack">
+                <label>
+                  输出类型
+                  <select name="output_type" id="researchOutputType"></select>
+                </label>
+                <label>
+                  检索模式
+                  <select name="retrieval_mode">
+                    <option value="all_available">全部可用索引</option>
+                    <option value="strict_exhaustive">严格穷尽</option>
+                    <option value="fast_local">本地快速</option>
+                  </select>
+                </label>
+                <label>
+                  返回数量
+                  <input type="number" name="top_k" value="8" min="1" max="40" />
+                </label>
+                <button type="submit">生成 Project Markdown</button>
+              </div>
+            </form>
+            <pre id="researchOutputResult" class="json-box"></pre>
           </section>
         </section>
 

@@ -1,0 +1,29 @@
+{
+  "pack_id": "gaa_vertical",
+  "name": "Vertical GAA Research Pack",
+  "version": "0.1.0",
+  "description": "Research pack for vertical gate-all-around architecture families, including nanosheet, nanotube, nanowire, and related GAA-like process routes.",
+  "default_project_name": "Vertical GAA Research",
+  "record_types": [
+    "architecture_variant",
+    "process_module",
+    "device_metric",
+    "bottleneck",
+    "claim",
+    "hypothesis"
+  ],
+  "outputs": {
+    "vertical_architecture_matrix": "templates/vertical_architecture_matrix.md",
+    "process_flow_map": "templates/process_flow_map.md",
+    "bottleneck_ledger": "templates/bottleneck_ledger.md",
+    "evidence_matrix": "templates/evidence_matrix.md",
+    "low_difficulty_first_step_proposal": "templates/low_difficulty_first_step_proposal.md"
+  },
+  "output_titles": {
+    "vertical_architecture_matrix": "Vertical Architecture Matrix",
+    "process_flow_map": "Process Flow Map",
+    "bottleneck_ledger": "Bottleneck Ledger",
+    "evidence_matrix": "Evidence Matrix",
+    "low_difficulty_first_step_proposal": "Low-Difficulty First-Step Proposal"
+  }
+}

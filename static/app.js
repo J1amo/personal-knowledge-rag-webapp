@@ -1,5 +1,12 @@
 const state = {
   sources: [],
+  research: {
+    projects: [],
+    packs: [],
+    currentProjectId: "",
+    projectSources: [],
+    outputTypes: [],
+  },
 };
 
 const domainLabel = {
@@ -64,6 +71,7 @@ const branchLandingPage = {
   dashboard: "dashboard",
   collect: "upload",
   retrieve: "query",
+  research: "research",
   publish: "outputs",
   maintain: "maintenance",
 };
@@ -79,6 +87,7 @@ const pageBranch = {
   audits: "retrieve",
   pdf: "retrieve",
   compare: "retrieve",
+  research: "research",
   outputs: "publish",
   maintenance: "maintain",
   settings: "maintain",
@@ -95,9 +104,10 @@ const pageMeta = {
   audits: ["02 检索 / 审计", "复查后端命中、合并去重、引用和修复线索。"],
   pdf: ["02 检索 / PDF 阅读器", "按来源 ID、页码和引用回到原始 PDF。"],
   compare: ["02 检索 / 评估", "比较不同检索模式的命中、重叠和缺口。"],
-  outputs: ["03 输出 / Markdown", "把证据打包成摘要、综述、汇报或 Codex 提示词。"],
-  maintenance: ["04 维护 / 维护中心", "重建索引、备份数据库、生成 Codex 修复指导。"],
-  settings: ["04 维护 / 设置", "检查本地 LLM / Gemma4 OpenAI-compatible 端点。"],
+  research: ["03 Research / 工作台", "管理研究项目、资料范围和研究包输出。"],
+  outputs: ["04 输出 / Markdown", "把证据打包成摘要、综述、汇报或 Codex 提示词。"],
+  maintenance: ["05 维护 / 维护中心", "重建索引、备份数据库、生成 Codex 修复指导。"],
+  settings: ["05 维护 / 设置", "检查本地 LLM / Gemma4 OpenAI-compatible 端点。"],
 };
 
 async function api(path, options = {}) {
@@ -125,6 +135,16 @@ function esc(value) {
 
 function jsonBox(el, value) {
   el.textContent = JSON.stringify(value, null, 2);
+}
+
+function optionList(rows, valueKey, labeler, emptyLabel = "") {
+  const empty = emptyLabel ? `<option value="">${esc(emptyLabel)}</option>` : "";
+  return (
+    empty +
+    rows
+      .map((row) => `<option value="${esc(row[valueKey])}">${esc(labeler(row))}</option>`)
+      .join("")
+  );
 }
 
 function initFilePickers() {
@@ -228,6 +248,7 @@ function switchPage(target) {
   if (page === "processing") loadProcessing();
   if (page === "audits") loadAudits();
   if (page === "outputs") loadOutputs();
+  if (page === "research") loadResearch();
   if (page === "settings") loadLocalLlmStatus();
 }
 
@@ -391,6 +412,119 @@ async function loadOutputs() {
     { label: "质量检查", render: (row) => `<code>${esc(row.quality_checks_json)}</code>` },
     { label: "创建时间", key: "created_at" },
   ]);
+}
+
+function currentResearchProject() {
+  return state.research.projects.find((project) => project.project_id === state.research.currentProjectId) || null;
+}
+
+function renderResearchSelectors() {
+  const packSelect = document.getElementById("researchPackSelect");
+  packSelect.innerHTML = optionList(
+    state.research.packs,
+    "pack_id",
+    (pack) => `${pack.name} (${pack.pack_id})`,
+    "无 Pack",
+  );
+
+  const projectSelect = document.getElementById("researchProjectSelect");
+  projectSelect.innerHTML = optionList(
+    state.research.projects,
+    "project_id",
+    (project) => `${project.name} (${project.source_count || 0})`,
+    "未选择",
+  );
+  projectSelect.value = state.research.currentProjectId;
+
+  const sourceSelect = document.getElementById("researchSourceSelect");
+  sourceSelect.innerHTML = optionList(
+    state.sources,
+    "source_id",
+    (source) => `${source.original_filename} / ${source.source_id}`,
+    "未选择",
+  );
+
+  const project = currentResearchProject();
+  jsonBox(document.getElementById("researchProjectDetail"), project || { status: "empty" });
+}
+
+function renderResearchOutputTypes() {
+  const select = document.getElementById("researchOutputType");
+  select.innerHTML = optionList(
+    state.research.outputTypes,
+    "output_type",
+    (item) => `${item.title} (${item.source})`,
+  );
+}
+
+async function loadResearchProjectContext() {
+  if (!state.research.currentProjectId) {
+    state.research.projectSources = [];
+    state.research.outputTypes = [];
+    document.getElementById("researchSourcesTable").innerHTML = '<div class="muted">暂无 Project</div>';
+    renderResearchOutputTypes();
+    return;
+  }
+
+  const [sourcesData, outputTypeData] = await Promise.all([
+    api(`/api/research/project/sources?project_id=${encodeURIComponent(state.research.currentProjectId)}`),
+    api(`/api/research/output-types?project_id=${encodeURIComponent(state.research.currentProjectId)}`),
+  ]);
+  state.research.projectSources = sourcesData.sources || [];
+  state.research.outputTypes = outputTypeData.output_types || [];
+  renderResearchOutputTypes();
+  document.getElementById("researchSourcesTable").innerHTML = table(state.research.projectSources, [
+    { label: "source_id", render: (row) => `<code>${esc(row.source_id)}</code>` },
+    { label: "文件", key: "original_filename" },
+    { label: "Role", key: "role" },
+    { label: "主题", key: "topic" },
+    { label: "敏感级别", render: (row) => esc(labelFrom(sensitivityLabel, row.sensitivity)) },
+    { label: "文本块", key: "chunk_count" },
+    {
+      label: "操作",
+      render: (row) => `<button class="secondary research-source-remove" data-source="${esc(row.source_id)}">移除</button>`,
+    },
+  ]);
+  document.querySelectorAll(".research-source-remove").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await api("/api/research/project/sources/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: state.research.currentProjectId,
+          source_id: btn.dataset.source,
+        }),
+      });
+      await loadResearch();
+    });
+  });
+}
+
+async function loadResearch() {
+  const [projectsData, packsData, sourcesData] = await Promise.all([
+    api("/api/research/projects"),
+    api("/api/research/packs"),
+    api("/api/sources"),
+  ]);
+  state.research.projects = projectsData.projects || [];
+  state.research.packs = packsData.packs || [];
+  state.sources = sourcesData.sources || [];
+  if (!state.research.projects.some((project) => project.project_id === state.research.currentProjectId)) {
+    state.research.currentProjectId = state.research.projects[0]?.project_id || "";
+  }
+  renderResearchSelectors();
+  await loadResearchProjectContext();
+}
+
+function switchResearchPanel(panel) {
+  document.querySelectorAll(".research-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.researchPanel === panel);
+  });
+  document.querySelectorAll(".research-panel").forEach((el) => {
+    const active = el.dataset.researchPanelView === panel;
+    el.classList.toggle("active", active);
+    el.hidden = !active;
+  });
 }
 
 async function loadDoiDownloads() {
@@ -597,6 +731,7 @@ async function init() {
   document.getElementById("refreshProcessing").addEventListener("click", loadProcessing);
   document.getElementById("refreshAudits").addEventListener("click", loadAudits);
   document.getElementById("refreshOutputs").addEventListener("click", loadOutputs);
+  document.getElementById("refreshResearch").addEventListener("click", loadResearch);
   document.getElementById("loadAuditDetail").addEventListener("click", () => loadAuditDetail());
   document.getElementById("generateAuditRepair").addEventListener("click", generateAuditRepair);
   document.getElementById("checkLocalLlm").addEventListener("click", loadLocalLlmStatus);
@@ -607,6 +742,14 @@ async function init() {
     input.addEventListener("change", updateImportForm),
   );
   document.getElementById("importSensitivity").addEventListener("change", updateImportSensitivityHint);
+  document.querySelectorAll(".research-tab").forEach((btn) => {
+    btn.addEventListener("click", () => switchResearchPanel(btn.dataset.researchPanel));
+  });
+  document.getElementById("researchProjectSelect").addEventListener("change", async (event) => {
+    state.research.currentProjectId = event.currentTarget.value;
+    renderResearchSelectors();
+    await loadResearchProjectContext();
+  });
 
   document.getElementById("importForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -633,6 +776,39 @@ async function init() {
     }
     jsonBox(document.getElementById("ingestResult"), result);
     await loadDashboard();
+  });
+
+  document.getElementById("researchProjectForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const project = await api("/api/research/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: form.name.value,
+        description: form.description.value,
+        pack_id: form.pack_id.value || null,
+      }),
+    });
+    state.research.currentProjectId = project.project_id;
+    form.reset();
+    await loadResearch();
+  });
+
+  document.getElementById("researchSourceForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!state.research.currentProjectId) throw new Error("需要先选择 Project");
+    await api("/api/research/project/sources/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: state.research.currentProjectId,
+        source_id: form.source_id.value,
+        role: form.role.value,
+      }),
+    });
+    await loadResearch();
   });
 
   document.getElementById("doiForm").addEventListener("submit", async (event) => {
@@ -754,6 +930,32 @@ async function init() {
       文件路径: result.file_path,
       质量检查: result.quality_checks,
       LLM: result.llm,
+    });
+    await loadOutputs();
+  });
+
+  document.getElementById("researchOutputForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!state.research.currentProjectId) throw new Error("需要先选择 Project");
+    const result = await api("/api/research/output/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: state.research.currentProjectId,
+        question: form.question.value,
+        output_type: form.output_type.value,
+        retrieval_mode: form.retrieval_mode.value,
+        top_k: Number(form.top_k.value || 8),
+        llm_backend: "gemma4",
+      }),
+    });
+    jsonBox(document.getElementById("researchOutputResult"), {
+      输出ID: result.output_id,
+      Project: result.project_id,
+      Pack: result.pack_id,
+      文件路径: result.file_path,
+      质量检查: result.quality_checks,
     });
     await loadOutputs();
   });
