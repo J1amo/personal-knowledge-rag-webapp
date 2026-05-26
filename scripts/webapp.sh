@@ -29,6 +29,16 @@ python_bin() {
   fi
 }
 
+xml_escape() {
+  local value="${1:-}"
+  value="${value//&/&amp;}"
+  value="${value//</&lt;}"
+  value="${value//>/&gt;}"
+  value="${value//\"/&quot;}"
+  value="${value//\'/&apos;}"
+  printf '%s\n' "$value"
+}
+
 health() {
   "$(python_bin)" - "$URL/api/health" <<'PY'
 import json
@@ -128,6 +138,16 @@ status() {
   else
     echo "PID file: none"
   fi
+  echo "Project Python: $(python_bin)"
+  if [ -f "$PLIST_PATH" ]; then
+    local plist_python
+    plist_python="$(plutil -extract EnvironmentVariables.PKB_PYTHON raw -o - "$PLIST_PATH" 2>/dev/null || true)"
+    if [ -n "$plist_python" ]; then
+      echo "LaunchAgent Python: $plist_python"
+    else
+      echo "LaunchAgent Python: not pinned"
+    fi
+  fi
   local owner
   owner="$(port_owner)"
   if [ -n "$owner" ]; then
@@ -144,19 +164,21 @@ status() {
 }
 
 plist() {
+  local pkb_python
+  pkb_python="$(python_bin)"
   cat <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${LABEL}</string>
+  <string>$(xml_escape "$LABEL")</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${PROJECT_ROOT}/scripts/run_server.sh</string>
+    <string>$(xml_escape "${PROJECT_ROOT}/scripts/run_server.sh")</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>${PROJECT_ROOT}</string>
+  <string>$(xml_escape "$PROJECT_ROOT")</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -167,18 +189,20 @@ plist() {
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOST</key>
-    <string>${HOST}</string>
+    <string>$(xml_escape "$HOST")</string>
     <key>PORT</key>
-    <string>${PORT}</string>
+    <string>$(xml_escape "$PORT")</string>
+    <key>PKB_PYTHON</key>
+    <string>$(xml_escape "$pkb_python")</string>
     <key>LOCAL_MODELS_DIR</key>
-    <string>${LOCAL_MODELS_DIR}</string>
+    <string>$(xml_escape "$LOCAL_MODELS_DIR")</string>
     <key>PYTHONPYCACHEPREFIX</key>
     <string>/tmp/pkb-pycache</string>
   </dict>
   <key>StandardOutPath</key>
-  <string>${LAUNCHD_OUT_LOG}</string>
+  <string>$(xml_escape "$LAUNCHD_OUT_LOG")</string>
   <key>StandardErrorPath</key>
-  <string>${LAUNCHD_ERR_LOG}</string>
+  <string>$(xml_escape "$LAUNCHD_ERR_LOG")</string>
 </dict>
 </plist>
 PLIST

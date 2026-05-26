@@ -53,7 +53,7 @@ http://127.0.0.1:8765
 ~/Library/LaunchAgents/com.maber2k.personal-knowledge-rag-webapp.plist
 ```
 
-LaunchAgent 使用 `scripts/run_server.sh` 前台运行服务，`RunAtLoad=true`，异常退出时重启。日志写入 `logs/`，运行时 PID 写入 `run/`，两者都已加入 `.gitignore`。
+LaunchAgent 使用 `scripts/run_server.sh` 前台运行服务，`RunAtLoad=true`，异常退出时重启。`scripts/webapp.sh load` 会把当前项目 Python 写入 plist 的 `PKB_PYTHON`，避免登录自启动落回 macOS 系统 Python。日志写入 `logs/`，运行时 PID 写入 `run/`，两者都已加入 `.gitignore`。
 
 本轮按全局 Web App 自启动标准保留了三层入口：
 
