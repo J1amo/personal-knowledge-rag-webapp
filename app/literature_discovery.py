@@ -5,13 +5,13 @@ import os
 import time
 import urllib.parse
 import urllib.request
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 VALID_LANGUAGE_MODES = {"bilingual", "zh", "en"}
 
 Fetcher = Callable[[str], dict[str, Any]]
-Translator = Callable[[str], str | dict[str, Any]]
+Translator = Callable[[str], Union[str, dict[str, Any]]]
 
 
 def split_terms(value: str | list[str] | tuple[str, ...] | None) -> list[str]:
