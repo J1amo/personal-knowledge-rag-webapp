@@ -9,6 +9,59 @@ const state = {
   },
 };
 
+const themeStorageKey = "personal-research-os-theme";
+const allowedPalettes = new Set(["jade", "amber"]);
+const allowedModes = new Set(["light", "dark"]);
+
+function readStoredTheme() {
+  const params = new URLSearchParams(window.location.search);
+  const urlPalette = params.get("palette");
+  const urlMode = params.get("mode");
+  if (allowedPalettes.has(urlPalette) || allowedModes.has(urlMode)) {
+    return {
+      palette: allowedPalettes.has(urlPalette) ? urlPalette : "jade",
+      mode: allowedModes.has(urlMode) ? urlMode : "light",
+    };
+  }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(themeStorageKey) || "{}");
+    return {
+      palette: allowedPalettes.has(parsed.palette) ? parsed.palette : "jade",
+      mode: allowedModes.has(parsed.mode) ? parsed.mode : "light",
+    };
+  } catch (_err) {
+    return { palette: "jade", mode: "light" };
+  }
+}
+
+function applyTheme(theme) {
+  const palette = allowedPalettes.has(theme.palette) ? theme.palette : "jade";
+  const mode = allowedModes.has(theme.mode) ? theme.mode : "light";
+  document.body.dataset.palette = palette;
+  document.body.dataset.mode = mode;
+  document.querySelectorAll("[data-theme-palette]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.themePalette === palette));
+  });
+  document.querySelectorAll("[data-theme-mode]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.themeMode === mode));
+  });
+  try {
+    localStorage.setItem(themeStorageKey, JSON.stringify({ palette, mode }));
+  } catch (_err) {
+    // Theme persistence is a convenience; the UI should still work without storage.
+  }
+}
+
+function initThemeControls() {
+  applyTheme(readStoredTheme());
+  document.querySelectorAll("[data-theme-palette]").forEach((button) => {
+    button.addEventListener("click", () => applyTheme({ palette: button.dataset.themePalette, mode: document.body.dataset.mode }));
+  });
+  document.querySelectorAll("[data-theme-mode]").forEach((button) => {
+    button.addEventListener("click", () => applyTheme({ palette: document.body.dataset.palette, mode: button.dataset.themeMode }));
+  });
+}
+
 const domainLabel = {
   paper: "论文",
   chat: "对话",
@@ -718,6 +771,7 @@ async function runLiteratureDiscovery(form) {
 }
 
 async function init() {
+  initThemeControls();
   updateWorkflowContext("dashboard");
   updateNavigation("dashboard");
   initFilePickers();
@@ -973,6 +1027,11 @@ async function init() {
     });
     jsonBox(document.getElementById("maintenanceReportBox"), result);
   });
+
+  const requestedPage = new URLSearchParams(window.location.search).get("page");
+  if (requestedPage && pageBranch[resolvePage(requestedPage)]) {
+    switchPage(requestedPage);
+  }
 
   try {
     const health = await api("/api/health");

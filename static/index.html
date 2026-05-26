@@ -6,7 +6,7 @@
     <title>个人知识库</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body data-palette="jade" data-mode="light">
     <div class="app-shell">
       <header class="app-header">
         <button class="brand home-button nav-item active" data-page="dashboard" aria-label="回到工作台">
@@ -17,10 +17,22 @@
           </div>
         </button>
 
-        <div class="runtime-boundary" aria-label="运行边界">
-          <span>本地优先</span>
-          <span>API 可选</span>
-          <span>原文保留</span>
+        <div class="header-rail">
+          <div class="runtime-boundary" aria-label="运行边界">
+            <span>本地优先</span>
+            <span>API 可选</span>
+            <span>原文保留</span>
+          </div>
+          <div class="theme-controls" aria-label="界面主题">
+            <div class="theme-segment" aria-label="配色">
+              <button type="button" data-theme-palette="jade" aria-pressed="true">Jade</button>
+              <button type="button" data-theme-palette="amber" aria-pressed="false">Amber</button>
+            </div>
+            <div class="theme-segment" aria-label="深浅模式">
+              <button type="button" data-theme-mode="light" aria-pressed="true">Light</button>
+              <button type="button" data-theme-mode="dark" aria-pressed="false">Dark</button>
+            </div>
+          </div>
         </div>
       </header>
 
