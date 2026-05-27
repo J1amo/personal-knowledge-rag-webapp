@@ -1427,7 +1427,15 @@ class PlaywrightDownloadSession:
             state, reason, diagnostics = _classify_access_block_detail(status_code, landing_url, self._body_text(page))
             diagnostics = {**diagnostics, "landing_candidate": candidate}
             state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
-            if should_wait_for_manual_access(state, self.settings):
+            links = _pdf_links_from_page(page)
+            defer_manual_wait = bool(state in {"needs_login", "blocked_by_access"} and links)
+            if defer_manual_wait:
+                diagnostics = {
+                    **diagnostics,
+                    "manual_access_wait_deferred_for_pdf_links": True,
+                    "pdf_link_count_before_manual_wait": len(links),
+                }
+            elif should_wait_for_manual_access(state, self.settings):
                 deadline = time.monotonic() + self.settings.manual_login_timeout_seconds
                 waited_seconds = 0.0
                 while time.monotonic() < deadline:
@@ -1445,7 +1453,7 @@ class PlaywrightDownloadSession:
                     state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
                     if state not in MANUAL_ACCESS_WAIT_STATUSES:
                         break
-            if state and state != "blocked_by_access":
+            if state and state != "blocked_by_access" and not defer_manual_wait:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
                 return DownloadAttempt(
                     state,
@@ -1459,7 +1467,6 @@ class PlaywrightDownloadSession:
                     diagnostics,
                 )
 
-            links = _pdf_links_from_page(page)
             if not links:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
                 if state == "blocked_by_access":

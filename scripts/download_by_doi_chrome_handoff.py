@@ -228,11 +228,21 @@ class ChromeHandoffDownloadSession:
             landing_url = page.url
             domain = publisher_domain(landing_url)
             state, reason, diagnostics = _classify_access_block_detail(None, landing_url, self._body_text(page))
-            state, reason, diagnostics = self._wait_for_manual_clearance(
-                page, state, reason, diagnostics, settings, candidate
-            )
+            links = _pdf_links_from_page(page)
             diagnostics = {**diagnostics, "landing_candidate": candidate}
-            if state:
+            defer_manual_wait = bool(state in {"needs_login", "blocked_by_access"} and links)
+            if defer_manual_wait:
+                diagnostics = {
+                    **diagnostics,
+                    "manual_access_wait_deferred_for_pdf_links": True,
+                    "pdf_link_count_before_manual_wait": len(links),
+                }
+            else:
+                state, reason, diagnostics = self._wait_for_manual_clearance(
+                    page, state, reason, diagnostics, settings, candidate
+                )
+                diagnostics = {**diagnostics, "landing_candidate": candidate}
+            if state and not defer_manual_wait:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
                 return DownloadAttempt(
                     state,
@@ -246,7 +256,6 @@ class ChromeHandoffDownloadSession:
                     diagnostics,
                 )
 
-            links = _pdf_links_from_page(page)
             if self.use_deepseek:
                 advice = _deepseek_page_advice(page, links)
                 if advice.get("status") == "access_denied":
