@@ -427,6 +427,7 @@ class Handler(BaseHTTPRequestHandler):
                             "fast_mode": bool(payload.get("fast_mode")),
                             "auto_ingest": bool(payload.get("auto_ingest")),
                             "rebuild_after_ingest": bool(payload.get("rebuild_after_ingest")),
+                            "use_deepseek": bool(payload.get("use_deepseek", True)),
                         },
                     )
                 )

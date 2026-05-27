@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
 import shutil
@@ -38,13 +39,17 @@ LOG_DIR = config.OUTPUT_DIR / "doi_download_logs"
 SNAPSHOT_DIR = LOG_DIR / "snapshots"
 SERIALS_SOLUTIONS_BASE_URL = "https://jn2xs2wb8u.search.serialssolutions.com/"
 SERIALS_SOLUTIONS_LIB_HASH = "JN2XS2WB8U"
+OPENALEX_WORKS_BASE_URL = "https://api.openalex.org/works/"
+CROSSREF_MAILTO = "support@localhost"
+CROSSREF_USER_AGENT = "personal-research-os-doi-downloader/0.1"
 
 STOP_BATCH_STATUSES = {
     "needs_login",
     "blocked_by_captcha",
     "blocked_by_rate_limit",
 }
-MANUAL_ACCESS_WAIT_STATUSES = {"needs_login", "blocked_by_access", "blocked_by_captcha"}
+MANUAL_ACCESS_WAIT_STATUSES = {"needs_login", "blocked_by_access"}
+ACCESS_STOP_STATUSES = MANUAL_ACCESS_WAIT_STATUSES | {"blocked_by_captcha"}
 SUCCESS_STATUSES = {"downloaded", "skipped_existing"}
 
 ACCESS_TERMS = (
@@ -405,6 +410,7 @@ class DoiDownloadSettings:
     article_delay_max: float = DEFAULT_ARTICLE_DELAY_MAX
     manual_login_timeout_seconds: int = DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS
     retry_limit: int = 1
+    use_deepseek: bool = True
 
 
 @dataclass
@@ -512,6 +518,7 @@ def resolve_settings(payload: dict[str, Any] | DoiDownloadSettings | None = None
             manual_login_timeout_seconds=int(
                 payload.get("manual_login_timeout_seconds") or DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS
             ),
+            use_deepseek=bool(payload.get("use_deepseek", True)),
         )
     if settings.fast_mode:
         settings.max_items = max(1, min(settings.max_items, FAST_MAX_ITEMS))
@@ -552,6 +559,9 @@ def doi_downloader_status() -> dict[str, Any]:
             "manual_access_wait_statuses": sorted(MANUAL_ACCESS_WAIT_STATUSES),
             "manual_login_timeout_seconds": DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS,
             "max_manual_login_timeout_seconds": MAX_MANUAL_LOGIN_TIMEOUT_SECONDS,
+            "deepseek_default": True,
+            "deepseek_available": bool(os.getenv("DEEPSEEK_API_KEY")),
+            "deepseek_model": os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash",
             "licensed_platform_policy": "try Tsukuba-authorized platforms or open-access resolver candidates only",
             "authorized_platforms": [str(rule["name"]) for rule in SCHOOL_AUTHORIZED_PLATFORM_RULES],
             "campus_only_platforms": [
@@ -635,7 +645,7 @@ def apply_candidate_manual_wait_policy(
     diagnostics = dict(diagnostics or {})
     candidate = candidate or {}
     platform = candidate.get("authorized_platform") or (candidate.get("policy") or {}).get("platform")
-    if state in MANUAL_ACCESS_WAIT_STATUSES and isinstance(platform, dict) and platform.get("campus_only"):
+    if state in ACCESS_STOP_STATUSES and isinstance(platform, dict) and platform.get("campus_only"):
         diagnostics.update(
             {
                 "classification": "blocked_by_access",
@@ -731,7 +741,7 @@ def _is_open_access_candidate(candidate: dict[str, Any]) -> bool:
     source = str(candidate.get("source") or "").lower()
     return (
         _is_public_fulltext_host(host)
-        or source in {"hal_api"}
+        or source in {"hal_api", "openalex"}
         or any(term in label for term in ("open access", "オープンアクセス", "pubmed central"))
     )
 
@@ -930,7 +940,7 @@ def fetch_serials_solutions_candidates(doi: str, timeout: int = 25) -> list[dict
     url = serials_solutions_lookup_url(doi)
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "personal-research-os-doi-downloader/0.1"},
+        headers={"User-Agent": CROSSREF_USER_AGENT},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec - configured library link resolver
@@ -941,6 +951,64 @@ def fetch_serials_solutions_candidates(doi: str, timeout: int = 25) -> list[dict
     for candidate in candidates:
         candidate["lookup_url"] = url
     return _expand_public_repository_candidates(candidates)
+
+
+def openalex_lookup_url(doi: str) -> str:
+    return OPENALEX_WORKS_BASE_URL + urllib.parse.quote(f"doi:https://doi.org/{doi}", safe="")
+
+
+def parse_openalex_candidates(doi: str, json_text: str) -> list[dict[str, Any]]:
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError:
+        return []
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    lookup_url = openalex_lookup_url(doi)
+
+    def add(url: Any, text: str, priority: int) -> None:
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            return
+        if url in seen:
+            return
+        seen.add(url)
+        candidates.append(
+            {
+                "href": url,
+                "text": text,
+                "source": "openalex",
+                "priority": priority,
+                "publisher_domain": publisher_domain(url),
+                "lookup_url": lookup_url,
+            }
+        )
+
+    open_access = data.get("open_access") or {}
+    add(open_access.get("oa_url"), "OpenAlex OA URL", 18)
+    locations = []
+    primary = data.get("primary_location")
+    if isinstance(primary, dict):
+        locations.append(primary)
+    for location in data.get("locations") or []:
+        if isinstance(location, dict):
+            locations.append(location)
+    for location in locations:
+        add(location.get("pdf_url"), "OpenAlex PDF URL", 12)
+        add(location.get("landing_page_url"), "OpenAlex landing URL", 22)
+    return sorted(candidates, key=lambda item: item["priority"])
+
+
+def fetch_openalex_candidates(doi: str, timeout: int = 15) -> list[dict[str, Any]]:
+    url = openalex_lookup_url(doi)
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": f"{CROSSREF_USER_AGENT} (mailto:{os.getenv('OPENALEX_MAILTO') or CROSSREF_MAILTO})"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec - public OA metadata API
+            return parse_openalex_candidates(doi, response.read().decode("utf-8", "replace"))
+    except Exception:
+        return []
 
 
 def no_authorized_landing_attempt(doi: str, metadata: dict[str, Any] | None = None) -> DownloadAttempt:
@@ -969,6 +1037,34 @@ def no_authorized_landing_attempt(doi: str, metadata: dict[str, Any] | None = No
         None,
         diagnostics,
     )
+
+
+def preflight_candidate_block_attempt(candidate: dict[str, Any]) -> DownloadAttempt | None:
+    policy = candidate.get("policy") or {}
+    platform = candidate.get("authorized_platform") or policy.get("platform") or {}
+    if policy.get("open_access"):
+        return None
+    if isinstance(platform, dict) and platform.get("campus_only"):
+        platform_name = platform.get("name") or "该平台"
+        diagnostics = {
+            "classification": "blocked_by_access",
+            "preflight_blocked": True,
+            "preflight_blocked_reason": "campus_only_platform",
+            "authorized_platform": platform,
+            "landing_candidate": candidate,
+        }
+        return DownloadAttempt(
+            "blocked_by_access",
+            str(candidate.get("href") or ""),
+            publisher_domain(candidate.get("href")),
+            None,
+            None,
+            f"{platform_name} 在筑波清单中标记为校区内限定；先不打开自动化浏览器冲撞验证页",
+            None,
+            None,
+            diagnostics,
+        )
+    return None
 
 
 def tsukuba_proxy_url(url: str | None) -> str | None:
@@ -1019,6 +1115,17 @@ def doi_landing_candidates(
         for annotated in [_annotate_candidate_policy(candidate, metadata)]
         if annotated["policy"]["allowed"]
     ]
+    if not candidates:
+        openalex_candidates = [
+            annotated
+            for candidate in fetch_openalex_candidates(doi)
+            for annotated in [_annotate_candidate_policy(candidate, metadata)]
+            if annotated["policy"]["allowed"]
+        ]
+        seen_hrefs = {str(candidate.get("href") or "") for candidate in candidates}
+        candidates.extend(
+            candidate for candidate in openalex_candidates if str(candidate.get("href") or "") not in seen_hrefs
+        )
     if include_direct:
         direct_policy = _direct_doi_candidate_policy(metadata)
         if direct_policy["allowed"]:
@@ -1036,6 +1143,89 @@ def doi_landing_candidates(
         if direct and all(candidate.get("href") != direct["href"] for candidate in candidates):
             candidates.append(direct)
     return _expand_tsukuba_proxy_candidates(candidates)
+
+
+def _page_link_candidates(page: Any) -> list[dict[str, str]]:
+    try:
+        return page.evaluate(
+            """
+            () => Array.from(document.querySelectorAll('a[href], button, [role="button"]')).slice(0, 80).map((el) => ({
+              tag: el.tagName,
+              text: (el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 160),
+              href: el.href || el.getAttribute('href') || '',
+              aria: el.getAttribute('aria-label') || '',
+            }))
+            """
+        )
+    except Exception:
+        return []
+
+
+def _deepseek_page_advice(page: Any, links: list[dict[str, str]]) -> dict[str, Any]:
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        return {"status": "not_configured", "pdf_url": "", "reason": "DEEPSEEK_API_KEY is not set"}
+    base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").rstrip("/")
+    model = os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash"
+    try:
+        page_state = page.evaluate(
+            """
+            () => ({
+              url: location.href,
+              title: document.title,
+              text: (document.body?.innerText || '').slice(0, 5000),
+            })
+            """
+        )
+    except Exception as exc:
+        return {"status": "no_pdf_unknown", "pdf_url": "", "reason": f"Page state unavailable: {exc}"}
+    page_links = _page_link_candidates(page)
+    payload = {
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You classify publisher article pages for an authorized DOI downloader. "
+                    "Never suggest bypassing CAPTCHA, paywalls, login, or access controls. "
+                    "Return only JSON with keys status, pdf_url, reason. "
+                    "status must be one of access_denied, login_required, captcha_or_security, "
+                    "pdf_available, no_pdf_unknown. pdf_url must be one of the provided candidate hrefs or empty."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "page": page_state,
+                        "existing_pdf_links": links[:20],
+                        "link_candidates": page_links,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+        "max_tokens": 300,
+    }
+    request = urllib.request.Request(
+        base_url + "/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:  # nosec - user-configured DeepSeek endpoint
+            data = json.loads(response.read().decode("utf-8"))
+        content = data["choices"][0]["message"]["content"]
+        parsed = json.loads(content)
+        allowed_hrefs = {item.get("href") for item in [*links, *page_links] if item.get("href")}
+        if parsed.get("pdf_url") and parsed["pdf_url"] not in allowed_hrefs:
+            parsed["pdf_url"] = ""
+        parsed["model"] = model
+        return parsed
+    except Exception as exc:
+        return {"status": "no_pdf_unknown", "pdf_url": "", "reason": f"DeepSeek advisor failed: {exc}"}
 
 
 def fetch_crossref_metadata(doi: str, timeout: int = 8) -> dict[str, Any]:
@@ -1548,6 +1738,23 @@ class PlaywrightDownloadSession:
             diagnostics = {**diagnostics, "landing_candidate": candidate}
             state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
             links = merge_pdf_links(_pdf_links_from_page(page), pdf_links_from_html_snapshot(page.content(), page.url))
+            if self.settings.use_deepseek and (state or not links):
+                advice = _deepseek_page_advice(page, links)
+                diagnostics = {**diagnostics, "deepseek_page_advice": advice}
+                advice_status = advice.get("status")
+                if advice_status == "captcha_or_security":
+                    state = "blocked_by_captcha"
+                    reason = advice.get("reason") or "DeepSeek classified page as CAPTCHA or security verification"
+                elif advice_status == "access_denied":
+                    state = "blocked_by_access"
+                    reason = advice.get("reason") or "DeepSeek classified page as access denied"
+                elif advice_status == "login_required":
+                    state = "needs_login"
+                    reason = advice.get("reason") or "DeepSeek classified page as login required"
+                elif advice_status == "pdf_available" and advice.get("pdf_url"):
+                    links = [{"href": advice["pdf_url"], "text": "deepseek_page_advice", "source": "deepseek"}]
+                    state = None
+                    reason = None
             defer_manual_wait = bool(state in {"needs_login", "blocked_by_access"} and links)
             if defer_manual_wait:
                 diagnostics = {
@@ -1641,6 +1848,10 @@ class PlaywrightDownloadSession:
             if not candidates:
                 return no_authorized_landing_attempt(doi, metadata)
             for candidate in candidates:
+                preflight_attempt = preflight_candidate_block_attempt(candidate)
+                if preflight_attempt:
+                    last_attempt = preflight_attempt
+                    continue
                 attempt = self._download_from_target(page, doi, metadata, artifacts_dir, candidate)
                 if attempt.status == "downloaded":
                     return attempt

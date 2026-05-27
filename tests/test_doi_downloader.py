@@ -79,6 +79,8 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(normal.page_action_wait_min, DEFAULT_PAGE_WAIT_MIN)
         self.assertEqual(normal.page_action_wait_max, DEFAULT_PAGE_WAIT_MAX)
         self.assertEqual(normal.manual_login_timeout_seconds, DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS)
+        self.assertTrue(normal.use_deepseek)
+        self.assertFalse(resolve_settings({"use_deepseek": False}).use_deepseek)
         self.assertNotEqual(normal.page_action_wait_min, normal.article_delay_min)
         self.assertEqual(resolve_settings({"manual_login_timeout_seconds": 5}).manual_login_timeout_seconds, 30)
         self.assertEqual(resolve_settings({"manual_login_timeout_seconds": 7200}).manual_login_timeout_seconds, 3600)
@@ -147,7 +149,7 @@ class DoiDownloaderTest(unittest.TestCase):
 
         self.assertTrue(should_wait_for_manual_access("needs_login", enabled))
         self.assertTrue(should_wait_for_manual_access("blocked_by_access", enabled))
-        self.assertTrue(should_wait_for_manual_access("blocked_by_captcha", enabled))
+        self.assertFalse(should_wait_for_manual_access("blocked_by_captcha", enabled))
         self.assertFalse(should_wait_for_manual_access("blocked_by_access", disabled))
 
     def test_campus_only_platform_suppresses_manual_login_wait(self) -> None:
@@ -180,6 +182,22 @@ class DoiDownloaderTest(unittest.TestCase):
 
         self.assertEqual(state, "blocked_by_access")
         self.assertTrue(diagnostics["manual_wait_suppressed"])
+
+    def test_campus_only_platform_preflight_blocks_browser_collision(self) -> None:
+        from app.doi_downloader import preflight_candidate_block_attempt
+
+        attempt = preflight_candidate_block_attempt(
+            {
+                "href": "https://doi.org/10.1063/1.4895030",
+                "policy": {"open_access": False},
+                "authorized_platform": {"name": "AIP Journals Complete", "campus_only": True},
+            }
+        )
+
+        self.assertIsNotNone(attempt)
+        self.assertEqual(attempt.status, "blocked_by_access")
+        self.assertIn("先不打开自动化浏览器", attempt.failure_reason or "")
+        self.assertTrue((attempt.diagnostics or {})["preflight_blocked"])
 
     def test_pdf_save_metadata_sidecar_existing_skip_and_hash(self) -> None:
         from app.doi_downloader import find_existing_download, save_pdf_and_metadata
@@ -384,6 +402,24 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(results[0]["source"], "hal_api")
         self.assertEqual(results[0]["href"], "https://hal.science/hal-04296517/file/FINAL%20VERSION.pdf")
 
+    def test_openalex_candidates_extract_open_access_pdf_urls(self) -> None:
+        from app.doi_downloader import parse_openalex_candidates
+
+        payload = {
+            "open_access": {"oa_url": "https://repository.test/article"},
+            "primary_location": {"pdf_url": "https://repository.test/article.pdf"},
+            "locations": [
+                {"landing_page_url": "https://repository.test/article"},
+                {"pdf_url": "https://publisher.test/paywalled.pdf"},
+            ],
+        }
+
+        results = parse_openalex_candidates("10.1234/open", json.dumps(payload))
+
+        self.assertEqual(results[0]["href"], "https://repository.test/article.pdf")
+        self.assertEqual(results[0]["source"], "openalex")
+        self.assertEqual(len({item["href"] for item in results}), len(results))
+
     def test_doi_landing_candidates_append_direct_fallback(self) -> None:
         from app.doi_downloader import doi_landing_candidates
 
@@ -408,7 +444,9 @@ class DoiDownloaderTest(unittest.TestCase):
     def test_doi_landing_candidates_skip_non_authorized_direct_fallback(self) -> None:
         from app.doi_downloader import doi_landing_candidates, no_authorized_landing_attempt
 
-        with patch("app.doi_downloader.fetch_serials_solutions_candidates", return_value=[]):
+        with patch("app.doi_downloader.fetch_serials_solutions_candidates", return_value=[]), patch(
+            "app.doi_downloader.fetch_openalex_candidates", return_value=[]
+        ):
             candidates = doi_landing_candidates(
                 "10.1109/ted.2023.3268249",
                 {"publisher": "Institute of Electrical and Electronics Engineers (IEEE)"},
@@ -421,6 +459,27 @@ class DoiDownloaderTest(unittest.TestCase):
         )
         self.assertEqual(attempt.status, "skipped_not_authorized")
         self.assertIn("不在筑波大学授权数据库列表", attempt.failure_reason or "")
+
+    def test_doi_landing_candidates_use_openalex_before_direct_browser(self) -> None:
+        from app.doi_downloader import doi_landing_candidates
+
+        with patch("app.doi_downloader.fetch_serials_solutions_candidates", return_value=[]), patch(
+            "app.doi_downloader.fetch_openalex_candidates",
+            return_value=[
+                {
+                    "href": "https://repository.test/article.pdf",
+                    "text": "OpenAlex PDF URL",
+                    "source": "openalex",
+                    "priority": 12,
+                    "publisher_domain": "repository.test",
+                }
+            ],
+        ):
+            candidates = doi_landing_candidates("10.1234/open", {"publisher": "Unknown Publisher"})
+
+        self.assertEqual(candidates[0]["source"], "openalex")
+        self.assertTrue(candidates[0]["policy"]["open_access"])
+        self.assertEqual([item["source"] for item in candidates], ["openalex"])
 
     def test_doi_landing_candidates_keep_open_access_even_when_publisher_not_authorized(self) -> None:
         from app.doi_downloader import doi_landing_candidates

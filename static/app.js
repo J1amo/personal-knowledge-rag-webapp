@@ -927,6 +927,7 @@ async function init() {
       headed: Boolean(form.headed.checked),
       allow_manual_login: Boolean(form.allow_manual_login.checked),
       fast_mode: Boolean(form.fast_mode.checked),
+      use_deepseek: Boolean(form.use_deepseek.checked),
       auto_ingest: Boolean(form.auto_ingest.checked),
     };
     const result = await api("/api/doi-downloads", {

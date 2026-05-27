@@ -36,6 +36,7 @@ def main() -> int:
     parser.add_argument("--fast-mode", action="store_true", help="Use 5-10s article delay, max 5 DOI values per batch.")
     parser.add_argument("--auto-ingest", action="store_true", help="Ingest downloaded PDFs into the knowledge base.")
     parser.add_argument("--rebuild-after-ingest", action="store_true", help="Rebuild indexes after optional ingestion.")
+    parser.add_argument("--no-deepseek", action="store_true", help="Disable DeepSeek page advice even when DEEPSEEK_API_KEY is set.")
     args = parser.parse_args()
 
     parts = []
@@ -57,6 +58,7 @@ def main() -> int:
             "fast_mode": args.fast_mode,
             "auto_ingest": args.auto_ingest,
             "rebuild_after_ingest": args.rebuild_after_ingest,
+            "use_deepseek": not args.no_deepseek,
         },
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

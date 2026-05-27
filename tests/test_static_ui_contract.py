@@ -56,6 +56,8 @@ class StaticUiContractTest(unittest.TestCase):
         self.assertIn('const doiSuccessStatuses = new Set(["downloaded", "skipped_existing"]);', app_js)
         self.assertIn("function renderDoiFailedLinks(downloads)", app_js)
         self.assertIn("最近 ${esc(latestByDoi.length)} 个 DOI 的最新状态", app_js)
+        self.assertIn('name="use_deepseek" checked', html)
+        self.assertIn("use_deepseek: Boolean(form.use_deepseek.checked)", app_js)
         self.assertIn(".doi-failed-links {", css)
         self.assertIn(".copy-box {", css)
 
