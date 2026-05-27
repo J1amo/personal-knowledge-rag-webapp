@@ -376,7 +376,6 @@ LOGIN_TERMS = (
     "access through another organization",
     "sign in through your institution",
     "sign in via your institution",
-    "remote access",
     "single sign-on",
     "shibboleth",
     "saml2/redirect/sso",

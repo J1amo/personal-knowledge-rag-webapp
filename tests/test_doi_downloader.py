@@ -129,6 +129,7 @@ class DoiDownloaderTest(unittest.TestCase):
         )
         self.assertEqual(classify_access_block(200, "https://idp.test", "Shibboleth sign in MFA required")[0], "needs_login")
         self.assertEqual(classify_access_block(200, "https://publisher.test", "Access through your organization")[0], "needs_login")
+        self.assertIsNone(classify_access_block(200, "https://publisher.test", "remote access configuration")[0])
 
     def test_manual_access_wait_covers_institution_access_pages(self) -> None:
         from app.doi_downloader import resolve_settings, should_wait_for_manual_access
