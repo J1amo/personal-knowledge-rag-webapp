@@ -272,37 +272,32 @@ function renderDoiFailedLinks(downloads) {
     return '<h3>未下载成功 DOI 链接</h3><div class="muted">暂无 DOI 下载任务。</div>';
   }
 
-  const latestJobId = latestJob.job_id;
-  const scopedItems = items.filter((item) => item.job_id === latestJobId);
+  const latestByDoi = [];
   const failedItems = [];
   const seen = new Set();
-  scopedItems.forEach((item) => {
-    if (!item.doi || doiSuccessStatuses.has(item.status)) return;
-    if (seen.has(item.doi)) return;
+  items.forEach((item) => {
+    if (!item.doi || seen.has(item.doi)) return;
     seen.add(item.doi);
+    latestByDoi.push(item);
+    if (doiSuccessStatuses.has(item.status)) return;
+    if (item.status === "pending") return;
+    if (item.status === "stopped" && String(item.failure_reason || "").startsWith("Not processed because the job stopped")) return;
     failedItems.push(item);
   });
 
-  const pendingCount = scopedItems.filter((item) => item.status === "pending").length;
-  const unprocessedCount = Number(latestJob.summary?.unprocessed_count || 0);
-  const legacyMissingCount = Math.max(0, unprocessedCount - pendingCount);
   if (!failedItems.length) {
     return `<h3>未下载成功 DOI 链接</h3>
-      <div class="policy-box">最新任务没有未下载成功的 DOI。</div>`;
+      <div class="policy-box">最近记录中没有未下载成功的 DOI。</div>`;
   }
 
   const links = failedItems.map((item) => doiUrl(item.doi));
-  const legacyNote = legacyMissingCount
-    ? `<div class="policy-box warn">这条历史任务还有 ${esc(legacyMissingCount)} 篇未处理 DOI，但旧日志没有保存它们的明细；新任务会完整记录 pending DOI。</div>`
-    : "";
   return `<div class="doi-failed-links">
     <div class="doi-failed-head">
       <h3>未下载成功 DOI 链接</h3>
       <span class="pill warn">${esc(failedItems.length)} 篇</span>
     </div>
-    <div class="muted">范围：最新任务 <code>${esc(latestJobId)}</code>。已下载和已存在的 DOI 不列入。</div>
+    <div class="muted">范围：最近 ${esc(latestByDoi.length)} 个 DOI 的最新状态。已下载、已存在和被同一阻断连带停止的 DOI 不列入。</div>
     <textarea class="copy-box" readonly rows="${Math.min(Math.max(links.length, 4), 12)}">${esc(links.join("\n"))}</textarea>
-    ${legacyNote}
     ${table(failedItems, [
       { label: "DOI 链接", render: (row) => `<a href="${esc(doiUrl(row.doi))}" target="_blank" rel="noreferrer">${esc(doiUrl(row.doi))}</a>` },
       { label: "状态", render: (row) => esc(labelFrom(statusLabel, row.status)) },

@@ -55,6 +55,7 @@ class StaticUiContractTest(unittest.TestCase):
         self.assertIn("未下载成功 DOI 链接", app_js)
         self.assertIn('const doiSuccessStatuses = new Set(["downloaded", "skipped_existing"]);', app_js)
         self.assertIn("function renderDoiFailedLinks(downloads)", app_js)
+        self.assertIn("最近 ${esc(latestByDoi.length)} 个 DOI 的最新状态", app_js)
         self.assertIn(".doi-failed-links {", css)
         self.assertIn(".copy-box {", css)
 
