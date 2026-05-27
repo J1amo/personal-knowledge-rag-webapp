@@ -207,10 +207,10 @@ python3 -m playwright install chromium
 如果出版社安全验证在自动化浏览器里循环不通过，改用真实浏览器人工接管模式：
 
 ```bash
-./scripts/manual_doi_download_assist.py --doi-file dois.txt --auto-ingest --timeout-seconds 3600
+./scripts/download_by_doi_chrome_handoff.py --doi-file dois.txt --auto-ingest --manual-login-timeout-seconds 900
 ```
 
-该模式每次打开一个 DOI；用户在真实浏览器里完成登录/验证并下载 PDF 后，脚本自动侦测新 PDF、保存 metadata，并按需加入文档库。
+该模式启动一个真实 Chrome handoff 会话；用户只负责登录/验证，脚本在页面通过后自动找 PDF 链接、下载、保存 metadata，并按需加入文档库。若页面明确显示学校未提供访问权限，会记录为 `blocked_by_access` 并继续下一篇。
 
 默认不自动 ingestion；如需下载后加入文档库：
 

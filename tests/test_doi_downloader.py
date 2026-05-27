@@ -93,6 +93,10 @@ class DoiDownloaderTest(unittest.TestCase):
         from app.doi_downloader import classify_access_block
 
         self.assertEqual(classify_access_block(403, "https://publisher.test/article", "")[0], "blocked_by_access")
+        self.assertEqual(
+            classify_access_block(200, "https://pubs.acs.org/article", "Access is not provided via University of Tsukuba")[0],
+            "blocked_by_access",
+        )
         self.assertEqual(classify_access_block(429, "https://publisher.test/article", "")[0], "blocked_by_rate_limit")
         self.assertEqual(classify_access_block(200, "https://publisher.test", "Please complete CAPTCHA")[0], "blocked_by_captcha")
         self.assertEqual(

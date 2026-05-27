@@ -52,6 +52,7 @@ ACCESS_TERMS = (
     "institutional warning",
     "license required",
     "purchase access",
+    "access is not provided via",
 )
 CAPTCHA_TERMS = (
     "captcha",
