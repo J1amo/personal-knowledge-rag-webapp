@@ -274,11 +274,10 @@ class ChromeHandoffDownloadSession:
             request_text = ""
             request_content_type = ""
             fetch_status, fetch_content_type, fetch_body = self._pdf_bytes_from_page_fetch(page, pdf_url)
+            request_status = fetch_status
+            request_content_type = fetch_content_type
             if fetch_body is not None:
                 pdf_body = fetch_body
-            elif fetch_status:
-                request_status = fetch_status
-                request_content_type = fetch_content_type
             try:
                 if pdf_body is None:
                     pdf_response = self.context.request.get(pdf_url, timeout=60000)

@@ -372,8 +372,11 @@ LOGIN_TERMS = (
     "log in to access",
     "login to access",
     "sign in to access",
+    "access through your organization",
+    "access through another organization",
     "sign in through your institution",
     "sign in via your institution",
+    "remote access",
     "single sign-on",
     "shibboleth",
     "saml2/redirect/sso",
@@ -1284,6 +1287,46 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
             'wp-content/uploads',
             'manual.pdf',
           ];
+          const addLink = (href, text, source) => {
+            if (!href) {
+              return;
+            }
+            const lowerHref = href.toLowerCase();
+            if (href === '#' ||
+                lowerHref.startsWith('javascript:') ||
+                lowerHref.startsWith('mailto:') ||
+                lowerHref.startsWith('tel:') ||
+                blockedPdfTerms.some((term) => lowerHref.includes(term))) {
+              return;
+            }
+            if (!links.some((link) => link.href === href)) {
+              links.push({ href, text, source });
+            }
+          };
+          try {
+            const state = window.__PRELOADED_STATE__ || {};
+            const article = state.article || {};
+            const metadata = article.pdfDownload && article.pdfDownload.urlMetadata;
+            if (metadata && metadata.path && metadata.pii && metadata.pdfExtension) {
+              const url = new URL(`/${metadata.path}/${metadata.pii}${metadata.pdfExtension}`, location.origin);
+              Object.entries(metadata.queryParams || {}).forEach(([key, value]) => {
+                if (value !== undefined && value !== null) {
+                  url.searchParams.set(key, String(value));
+                }
+              });
+              addLink(url.href, 'sciencedirect_pdf_download', 'sciencedirect_state');
+            }
+            if (article.openManuscriptUrl) {
+              addLink(new URL(article.openManuscriptUrl, location.origin).href, 'sciencedirect_open_manuscript', 'sciencedirect_state');
+            }
+          } catch (_error) {
+          }
+          const currentUrl = new URL(location.href);
+          const currentLower = location.href.toLowerCase();
+          if (currentLower.endsWith('.pdf') || currentLower.includes('/pdf') ||
+              (currentUrl.hostname.endsWith('hal.science') && currentUrl.pathname.endsWith('/document'))) {
+            addLink(location.href, 'current_pdf_like_url', 'current_url');
+          }
           document.querySelectorAll('meta').forEach((meta) => {
             const name = (meta.getAttribute('name') || meta.getAttribute('property') || '').toLowerCase();
             const content = meta.getAttribute('content') || '';
@@ -1293,7 +1336,7 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
                 !lowerContent.startsWith('mailto:') &&
                 !lowerContent.startsWith('tel:') &&
                 !blockedPdfTerms.some((term) => lowerContent.includes(term))) {
-              links.push({ href: content, text: 'citation_pdf_url', source: 'meta' });
+              addLink(content, 'citation_pdf_url', 'meta');
             }
           });
           document.querySelectorAll('a[href]').forEach((a) => {
@@ -1311,16 +1354,16 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
             if (lowerHref.endsWith('.pdf') || lowerHref.includes('/pdf') ||
                 lowerText === 'pdf' || lowerText.includes('download pdf') ||
                 lowerText.includes('article pdf') || lowerText.includes('view pdf')) {
-              links.push({ href, text, source: 'link' });
+              addLink(href, text, 'link');
             }
           });
           const ieeeMatch = location.href.match(/ieeexplore\\.ieee\\.org\\/document\\/(\\d+)/i);
           if (ieeeMatch) {
-            links.push({
-              href: `https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=${ieeeMatch[1]}`,
-              text: 'ieee_stamp_pdf',
-              source: 'publisher_fallback',
-            });
+            addLink(
+              `https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=${ieeeMatch[1]}`,
+              'ieee_stamp_pdf',
+              'publisher_fallback'
+            );
           }
           return links;
         }

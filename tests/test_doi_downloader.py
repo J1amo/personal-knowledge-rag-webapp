@@ -128,6 +128,7 @@ class DoiDownloaderTest(unittest.TestCase):
             "needs_login",
         )
         self.assertEqual(classify_access_block(200, "https://idp.test", "Shibboleth sign in MFA required")[0], "needs_login")
+        self.assertEqual(classify_access_block(200, "https://publisher.test", "Access through your organization")[0], "needs_login")
 
     def test_manual_access_wait_covers_institution_access_pages(self) -> None:
         from app.doi_downloader import resolve_settings, should_wait_for_manual_access
@@ -289,6 +290,8 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertIn("stamp/stamp.jsp?tp=&arnumber=", source)
         self.assertIn("contentplatform_userguide", source)
         self.assertIn("wp-content/uploads", source)
+        self.assertIn("sciencedirect_pdf_download", source)
+        self.assertIn("current_pdf_like_url", source)
 
     def test_serials_solutions_candidates_keep_only_fulltext_routes(self) -> None:
         from app.doi_downloader import parse_serials_solutions_candidates, serials_solutions_lookup_url
