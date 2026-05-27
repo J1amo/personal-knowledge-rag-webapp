@@ -610,6 +610,14 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
               links.push({ href, text, source: 'link' });
             }
           });
+          const ieeeMatch = location.href.match(/ieeexplore\\.ieee\\.org\\/document\\/(\\d+)/i);
+          if (ieeeMatch) {
+            links.push({
+              href: `https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=${ieeeMatch[1]}`,
+              text: 'ieee_stamp_pdf',
+              source: 'publisher_fallback',
+            });
+          }
           return links;
         }
         """

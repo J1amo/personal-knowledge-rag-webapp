@@ -241,6 +241,8 @@ class DoiDownloaderTest(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] / "app" / "doi_downloader.py").read_text(encoding="utf-8")
         self.assertIn("lowerHref.startsWith('javascript:')", source)
         self.assertIn("lowerHref.startsWith('mailto:')", source)
+        self.assertIn("ieeexplore\\\\.ieee\\\\.org\\\\/document", source)
+        self.assertIn("stamp/stamp.jsp?tp=&arnumber=", source)
 
     def test_access_denied_item_continues_with_diagnostics(self) -> None:
         from app.doi_downloader import DownloadAttempt, run_doi_download_job
