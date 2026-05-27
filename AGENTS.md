@@ -73,7 +73,7 @@ Use `scripts/pkb.sh` as the daily command entry when possible:
 - Default all user-imported documents to private unless the user or metadata says otherwise.
 - Do not send private/confidential documents to API embedding, API retrieval, or API LLM paths without explicit user authorization.
 - Do not bypass login, CAPTCHA, paywalls, 403/429 responses, or institutional access warnings.
-- For DOI download debugging that requires human login or verification, Codex should prefer the Codex in-app browser first; use Chrome handoff only when the in-app browser cannot satisfy the session, download, or site-compatibility requirement.
+- For DOI download debugging that requires human login or verification, Codex should use the Codex in-app browser as the default interaction surface. Chrome handoff is a fallback only after the in-app browser cannot satisfy session, download, or site-compatibility requirements.
 - Do not delete raw files, databases, indexes, `.env`, or user configuration automatically.
 - Keep local vector, API vector, BM25, and graph coverage visible and explain missing coverage.
 - For retrieval changes, preserve audit trails and explain why expected evidence was hit, skipped, or missing.

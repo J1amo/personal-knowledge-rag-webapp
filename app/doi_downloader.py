@@ -372,8 +372,6 @@ LOGIN_TERMS = (
     "log in to access",
     "login to access",
     "sign in to access",
-    "access through your organization",
-    "access through another organization",
     "sign in through your institution",
     "sign in via your institution",
     "single sign-on",

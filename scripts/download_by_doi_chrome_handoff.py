@@ -281,6 +281,7 @@ class ChromeHandoffDownloadSession:
 
             pdf_url = links[0]["href"]
             pdf_body = None
+            browser_nav_error = None
             request_status = None
             request_text = ""
             request_content_type = ""
@@ -305,9 +306,19 @@ class ChromeHandoffDownloadSession:
                 nav_response = page.goto(pdf_url, wait_until="domcontentloaded", timeout=60000)
                 time.sleep(1)
                 if nav_response:
-                    browser_body = nav_response.body()
                     browser_content_type = (nav_response.headers.get("content-type", "") or "").lower()
-                    pdf_body = _extract_pdf_bytes(browser_body)
+                    try:
+                        browser_body = nav_response.body()
+                        pdf_body = _extract_pdf_bytes(browser_body)
+                    except Exception as exc:
+                        browser_nav_error = str(exc)
+                        request_text = request_text or self._body_text(page)
+                    if pdf_body is None:
+                        fetch_status, fetch_content_type, fetch_body = self._pdf_bytes_from_page_fetch(page, page.url)
+                        request_status = fetch_status or request_status
+                        request_content_type = fetch_content_type or browser_content_type or request_content_type
+                        if fetch_body is not None:
+                            pdf_body = fetch_body
 
             if pdf_body is not None:
                 return DownloadAttempt("downloaded", page.url, domain, pdf_url, pdf_body)
@@ -316,6 +327,8 @@ class ChromeHandoffDownloadSession:
             if not state:
                 state, reason, diagnostics = _classify_access_block_detail(None, page.url, self._body_text(page))
             if state:
+                if browser_nav_error:
+                    diagnostics = {**diagnostics, "browser_nav_response_body_error": browser_nav_error}
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
                 return DownloadAttempt(
                     state,
@@ -328,7 +341,10 @@ class ChromeHandoffDownloadSession:
                     html,
                     diagnostics,
                 )
-            return DownloadAttempt("failed", page.url, domain, pdf_url, None, "PDF link did not return a PDF")
+            reason = "PDF link did not return a PDF"
+            if browser_nav_error:
+                reason = f"{reason}; browser response body unavailable: {browser_nav_error}"
+            return DownloadAttempt("failed", page.url, domain, pdf_url, None, reason)
         except Exception as exc:
             screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
             return DownloadAttempt(
