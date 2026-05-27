@@ -1874,14 +1874,14 @@ def run_doi_download_job(
         item_id = _create_item(job_id, doi)
         _update_item(
             item_id,
-            status="pending",
+            status="stopped",
             failure_reason=f"Not processed because the job stopped: {stop_reason}",
         )
         items.append(
             {
                 "id": item_id,
                 "doi": doi,
-                "status": "pending",
+                "status": "stopped",
                 "failure_reason": f"Not processed because the job stopped: {stop_reason}",
                 "batch_index": batch_index,
                 "batch_item_index": batch_item_index,
