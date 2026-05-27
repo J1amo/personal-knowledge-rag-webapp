@@ -15,7 +15,9 @@ from .doi_downloader import (
     doi_downloader_status,
     list_doi_download_items,
     list_doi_download_jobs,
+    list_doi_verification_queue,
     run_doi_download_job,
+    run_doi_verification_queue_job,
 )
 from .indexes import rebuild_indexes
 from .ingest import ingest_file, ingest_folder
@@ -190,6 +192,7 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "jobs": list_doi_download_jobs(),
                         "items": list_doi_download_items(job_id=job_id),
+                        "verification_queue": list_doi_verification_queue(),
                     }
                 )
             elif path == "/api/maintenance/report":
@@ -407,6 +410,25 @@ class Handler(BaseHTTPRequestHandler):
                     generate_codex_repair_from_audit(
                         audit_id,
                         expected_behavior=payload.get("expected_behavior") or "",
+                    )
+                )
+            elif path == "/api/doi-downloads/retry-verification-queue":
+                payload = self._read_json()
+                self._send_json(
+                    run_doi_verification_queue_job(
+                        {
+                            "out_dir": payload.get("out_dir") or None,
+                            "max_items": int(payload.get("max_items") or 10),
+                            "headed": bool(payload.get("headed")),
+                            "allow_manual_login": bool(payload.get("allow_manual_login")),
+                            "manual_login_timeout_seconds": int(payload.get("manual_login_timeout_seconds") or 0)
+                            or None,
+                            "fast_mode": bool(payload.get("fast_mode")),
+                            "auto_ingest": bool(payload.get("auto_ingest")),
+                            "rebuild_after_ingest": bool(payload.get("rebuild_after_ingest")),
+                            "use_deepseek": bool(payload.get("use_deepseek", True)),
+                        },
+                        statuses=payload.get("statuses") or None,
                     )
                 )
             elif path == "/api/doi-downloads":

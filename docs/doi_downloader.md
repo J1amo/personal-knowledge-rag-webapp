@@ -65,6 +65,12 @@ Visible browser debugging and manual institutional login:
 
 By default, DOI downloads run in the background and should not open a visible automation browser. `--headed` is an explicit debug mode that shows the Playwright browser for the whole run. Only when both `--headed` and manual waiting are enabled can login and institutional access pages keep that visible browser open so the user can complete authorized access manually. Login pages are recorded as `needs_login` and the batch continues to later DOI values. CAPTCHA and publisher security verification pages are recorded as blocked states instead of being driven repeatedly by the automated browser.
 
+The web UI summarizes a login/verification queue for `needs_login`, `blocked_by_access`, CAPTCHA/security, and rate-limit items. Queue retry defaults to `needs_login` and `blocked_by_access` only, reusing the DOI downloader's persistent Playwright profile. CAPTCHA/security and rate-limit items remain visible for manual handling or later retry. The same retry path is available from the CLI:
+
+```bash
+./scripts/download_by_doi.py --retry-verification-queue --auto-ingest
+```
+
 If a publisher security page loops inside the automated browser, use the real-browser manual assist mode:
 
 ```bash

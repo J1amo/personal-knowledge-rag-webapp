@@ -206,6 +206,12 @@ python3 -m playwright install chromium
 
 默认 DOI 下载在后台执行，不应该打开可见自动化浏览器。`--headed` 是显式调试模式，会全程显示 Playwright 浏览器；只有同时启用 `--headed` 和手动等待时，登录页和机构访问页才会保持这个可见浏览器，等待用户完成合法授权访问。登录页会记录为 `needs_login` 并继续处理后续 DOI；验证码和出版社安全验证页会记录为阻断状态，不再让自动化浏览器反复冲撞。未解决的验证码、429 或可疑流量仍会停止批次。
 
+Web UI 的下载日志会汇总“登录/验证队列”，包括 `needs_login`、`blocked_by_access`、验证码/安全验证和限流项。队列重跑只默认处理 `needs_login` 与 `blocked_by_access`，并复用 DOI 下载器的持久 Playwright profile；验证码、安全验证和限流项会保留在队列中等待人工处理或稍后再试。CLI 可用同一机制：
+
+```bash
+./scripts/download_by_doi.py --retry-verification-queue --auto-ingest
+```
+
 如果出版社安全验证在自动化浏览器里循环不通过，改用真实浏览器人工接管模式：
 
 ```bash

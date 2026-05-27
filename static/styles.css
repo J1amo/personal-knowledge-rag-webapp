@@ -913,6 +913,12 @@ td code {
   margin-bottom: 18px;
 }
 
+.doi-log-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 .doi-failed-head {
   display: flex;
   align-items: center;

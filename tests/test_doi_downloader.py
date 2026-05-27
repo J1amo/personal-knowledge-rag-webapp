@@ -749,6 +749,81 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertIsNone(result["summary"]["stopped_reason"])
         self.assertIn("needs_login", result["summary"]["continue_item_statuses"])
 
+    def test_verification_queue_retries_latest_login_items(self) -> None:
+        from app.doi_downloader import (
+            DownloadAttempt,
+            doi_downloader_status,
+            list_doi_verification_queue,
+            run_doi_download_job,
+            run_doi_verification_queue_job,
+        )
+
+        pdf_path = self.root / "mock.pdf"
+        make_pdf(pdf_path, "Mock DOI PDF")
+
+        def first_runner(doi, _settings, _metadata, _artifacts_dir):
+            if doi.endswith("login"):
+                return DownloadAttempt(
+                    status="needs_login",
+                    landing_url="https://tsukuba.idm.oclc.org/login",
+                    publisher_domain="tsukuba.idm.oclc.org",
+                    failure_reason="Login required",
+                )
+            return DownloadAttempt(
+                status="downloaded",
+                landing_url=f"https://publisher.test/{doi}",
+                publisher_domain="publisher.test",
+                pdf_url=f"https://publisher.test/{doi}.pdf",
+                pdf_bytes=pdf_path.read_bytes(),
+            )
+
+        metadata_fetcher = lambda doi: {
+            "doi": doi,
+            "title": "Mock DOI PDF",
+            "authors": ["Grace Hopper"],
+            "year": 2026,
+            "publisher": "publisher.test",
+        }
+
+        run_doi_download_job(
+            "10.1234/login\n10.1234/downloaded",
+            {"out_dir": str(self.root / "papers"), "max_items": 2},
+            browser_runner=first_runner,
+            metadata_fetcher=metadata_fetcher,
+            sleeper=lambda _seconds: None,
+        )
+
+        queue = list_doi_verification_queue()
+        self.assertEqual([item["doi"] for item in queue], ["10.1234/login"])
+        self.assertEqual(queue[0]["queue_action"], "manual_login_then_retry")
+        self.assertTrue(queue[0]["retry_eligible"])
+        self.assertEqual(
+            doi_downloader_status()["access_session"]["mode"],
+            "playwright_persistent_context",
+        )
+
+        def retry_runner(doi, _settings, _metadata, _artifacts_dir):
+            return DownloadAttempt(
+                status="downloaded",
+                landing_url=f"https://publisher.test/{doi}",
+                publisher_domain="publisher.test",
+                pdf_url=f"https://publisher.test/{doi}.pdf",
+                pdf_bytes=pdf_path.read_bytes(),
+            )
+
+        retry = run_doi_verification_queue_job(
+            {"out_dir": str(self.root / "papers"), "max_items": 2},
+            browser_runner=retry_runner,
+            metadata_fetcher=metadata_fetcher,
+            sleeper=lambda _seconds: None,
+        )
+
+        self.assertEqual(retry["status"], "ready")
+        self.assertEqual(retry["verification_queue"]["retry_count"], 1)
+        self.assertEqual(retry["items"][0]["doi"], "10.1234/login")
+        self.assertEqual(retry["items"][0]["status"], "downloaded")
+        self.assertEqual(list_doi_verification_queue(), [])
+
     def test_max_items_is_batch_size_and_processes_full_list(self) -> None:
         from app.doi_downloader import DownloadAttempt, run_doi_download_job
 

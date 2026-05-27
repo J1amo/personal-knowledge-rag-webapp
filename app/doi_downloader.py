@@ -52,6 +52,16 @@ STOP_BATCH_STATUSES = {
 }
 MANUAL_ACCESS_WAIT_STATUSES = {"needs_login", "blocked_by_access"}
 ACCESS_STOP_STATUSES = MANUAL_ACCESS_WAIT_STATUSES | {"blocked_by_captcha"}
+VERIFICATION_QUEUE_STATUSES = (
+    "needs_login",
+    "blocked_by_access",
+    "blocked_by_captcha",
+    "blocked_by_rate_limit",
+)
+VERIFICATION_RETRY_STATUSES = (
+    "needs_login",
+    "blocked_by_access",
+)
 SUCCESS_STATUSES = {"downloaded", "skipped_existing"}
 
 ACCESS_TERMS = (
@@ -546,6 +556,13 @@ def doi_downloader_status() -> dict[str, Any]:
         "playwright_installed": find_spec("playwright") is not None,
         "profile_dir": str(profile),
         "profile_exists": profile.exists(),
+        "access_session": {
+            "mode": "playwright_persistent_context",
+            "profile_dir": str(profile),
+            "profile_exists": profile.exists(),
+            "headless_by_default": True,
+            "visible_manual_wait_requires_headed": True,
+        },
         "default_out_dir": str(default_out_dir()),
         "log_dir": str(LOG_DIR),
         "default_policy": {
@@ -559,6 +576,8 @@ def doi_downloader_status() -> dict[str, Any]:
             "fast_mode_article_delay_seconds": [FAST_ARTICLE_DELAY_MIN, FAST_ARTICLE_DELAY_MAX],
             "fast_mode_max_batch_size": FAST_MAX_ITEMS,
             "manual_access_wait_statuses": sorted(MANUAL_ACCESS_WAIT_STATUSES),
+            "verification_queue_statuses": list(VERIFICATION_QUEUE_STATUSES),
+            "verification_retry_statuses": list(VERIFICATION_RETRY_STATUSES),
             "manual_login_timeout_seconds": DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS,
             "max_manual_login_timeout_seconds": MAX_MANUAL_LOGIN_TIMEOUT_SECONDS,
             "deepseek_default": True,
@@ -1589,6 +1608,60 @@ def list_doi_download_items(job_id: str | None = None, limit: int = 100) -> list
     return [dict(row) for row in rows]
 
 
+def _verification_queue_action(status: str) -> str:
+    if status == "needs_login":
+        return "manual_login_then_retry"
+    if status == "blocked_by_access":
+        return "check_access_or_retry_after_login"
+    if status == "blocked_by_captcha":
+        return "manual_security_verification_required"
+    if status == "blocked_by_rate_limit":
+        return "wait_before_retry"
+    return "review"
+
+
+def _normalize_verification_statuses(statuses: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    allowed = set(VERIFICATION_QUEUE_STATUSES)
+    normalized = tuple(status for status in (statuses or VERIFICATION_QUEUE_STATUSES) if status in allowed)
+    return normalized or VERIFICATION_QUEUE_STATUSES
+
+
+def list_doi_verification_queue(
+    limit: int = 100,
+    statuses: list[str] | tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    init_db()
+    selected_statuses = _normalize_verification_statuses(statuses)
+    placeholders = ", ".join("?" for _ in selected_statuses)
+    query = f"""
+        SELECT i.id, i.job_id, i.doi, i.status, i.landing_url, i.publisher_domain, i.pdf_url,
+               i.saved_path, i.metadata_path, i.file_hash, i.failure_reason,
+               i.screenshot_path, i.html_snapshot_path, i.ingestion_source_id,
+               i.created_at, i.updated_at
+        FROM doi_download_items i
+        WHERE i.id = (
+          SELECT latest.id
+          FROM doi_download_items latest
+          WHERE latest.doi=i.doi
+          ORDER BY latest.updated_at DESC, latest.created_at DESC
+          LIMIT 1
+        )
+          AND i.status IN ({placeholders})
+        ORDER BY i.updated_at DESC
+        LIMIT ?
+    """
+    with connect() as con:
+        rows = con.execute(query, [*selected_statuses, limit]).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["doi_url"] = f"https://doi.org/{item['doi']}"
+        item["queue_action"] = _verification_queue_action(str(item.get("status") or ""))
+        item["retry_eligible"] = item.get("status") in VERIFICATION_RETRY_STATUSES
+        result.append(item)
+    return result
+
+
 def _write_job_log(job_id: str, summary: dict[str, Any], items: list[dict[str, Any]]) -> Path:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     path = LOG_DIR / f"{job_id}.json"
@@ -2363,3 +2436,47 @@ def run_doi_download_job(
     summary["log_path"] = str(log_path)
     _finish_job(job_id, job_status, summary, stop_reason)
     return {"status": job_status, "job_id": job_id, "summary": summary, "items": items}
+
+
+def run_doi_verification_queue_job(
+    settings: dict[str, Any] | DoiDownloadSettings | None = None,
+    *,
+    statuses: list[str] | tuple[str, ...] | None = None,
+    browser_runner: Callable[[str, DoiDownloadSettings, dict[str, Any], Path], DownloadAttempt] | None = None,
+    metadata_fetcher: Callable[[str], dict[str, Any]] = fetch_crossref_metadata,
+    sleeper: Callable[[float], None] | None = None,
+) -> dict[str, Any]:
+    retry_statuses = _normalize_verification_statuses(statuses or VERIFICATION_RETRY_STATUSES)
+    queue_items = list_doi_verification_queue(statuses=retry_statuses)
+    dois = [item["doi"] for item in queue_items if item.get("retry_eligible")]
+    if not dois:
+        return {
+            "status": "noop",
+            "job_id": None,
+            "summary": {
+                "message": "No retry-eligible DOI values in the verification queue",
+                "verification_queue_statuses": list(VERIFICATION_QUEUE_STATUSES),
+                "verification_retry_statuses": list(VERIFICATION_RETRY_STATUSES),
+                "selected_statuses": list(retry_statuses),
+                "queued_count": len(queue_items),
+                "retry_count": 0,
+                "profile_dir": str(PROFILE_DIR),
+            },
+            "verification_queue": queue_items,
+            "items": [],
+        }
+    result = run_doi_download_job(
+        "\n".join(dois),
+        settings,
+        browser_runner=browser_runner,
+        metadata_fetcher=metadata_fetcher,
+        sleeper=sleeper,
+    )
+    result["verification_queue"] = {
+        "source_statuses": list(retry_statuses),
+        "source_items": queue_items,
+        "retry_count": len(dois),
+        "profile_dir": str(PROFILE_DIR),
+        "persistent_access_session": True,
+    }
+    return result

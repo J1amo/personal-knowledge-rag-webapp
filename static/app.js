@@ -119,6 +119,13 @@ const retrievalModeLabel = {
 
 const collectIntakePages = new Set(["upload", "literature", "doi"]);
 const doiSuccessStatuses = new Set(["downloaded", "skipped_existing"]);
+const doiQueueActionLabel = {
+  manual_login_then_retry: "登录后重跑",
+  check_access_or_retry_after_login: "确认权限后重跑",
+  manual_security_verification_required: "人工验证",
+  wait_before_retry: "稍后重试",
+  review: "检查",
+};
 
 function labelFrom(labels, value) {
   return labels[value] || value || "";
@@ -302,6 +309,38 @@ function renderDoiFailedLinks(downloads) {
       { label: "DOI 链接", render: (row) => `<a href="${esc(doiUrl(row.doi))}" target="_blank" rel="noreferrer">${esc(doiUrl(row.doi))}</a>` },
       { label: "状态", render: (row) => esc(labelFrom(statusLabel, row.status)) },
       { label: "原因", key: "failure_reason" },
+    ])}
+  </div>`;
+}
+
+function renderDoiVerificationQueue(downloads) {
+  const queue = downloads.verification_queue || [];
+  if (!queue.length) {
+    return `<div class="doi-failed-links">
+      <div class="doi-failed-head">
+        <h3>登录/验证队列</h3>
+        <span class="pill ok">0 篇</span>
+      </div>
+      <div class="policy-box">没有等待登录或验证的 DOI。</div>
+    </div>`;
+  }
+
+  const retryable = queue.filter((item) => item.retry_eligible);
+  const links = queue.map((item) => doiUrl(item.doi));
+  return `<div class="doi-failed-links">
+    <div class="doi-failed-head">
+      <h3>登录/验证队列</h3>
+      <span class="pill warn">${esc(queue.length)} 篇</span>
+      <span class="pill">${esc(retryable.length)} 篇可重跑</span>
+    </div>
+    <textarea class="copy-box" readonly rows="${Math.min(Math.max(links.length, 4), 10)}">${esc(links.join("\n"))}</textarea>
+    ${table(queue, [
+      { label: "DOI 链接", render: (row) => `<a href="${esc(doiUrl(row.doi))}" target="_blank" rel="noreferrer">${esc(doiUrl(row.doi))}</a>` },
+      { label: "状态", render: (row) => esc(labelFrom(statusLabel, row.status)) },
+      { label: "动作", render: (row) => esc(labelFrom(doiQueueActionLabel, row.queue_action)) },
+      { label: "入口", render: (row) => (row.landing_url ? `<a href="${esc(row.landing_url)}" target="_blank" rel="noreferrer">${esc(row.publisher_domain || row.landing_url)}</a>` : "") },
+      { label: "原因", key: "failure_reason" },
+      { label: "更新时间", key: "updated_at" },
     ])}
   </div>`;
 }
@@ -633,6 +672,7 @@ function switchResearchPanel(panel) {
 async function loadDoiDownloads() {
   const [status, downloads] = await Promise.all([api("/api/doi-downloader/status"), api("/api/doi-downloads")]);
   jsonBox(document.getElementById("doiStatus"), status);
+  document.getElementById("doiVerificationQueue").innerHTML = renderDoiVerificationQueue(downloads);
   document.getElementById("doiFailedLinks").innerHTML = renderDoiFailedLinks(downloads);
   document.getElementById("doiJobsTable").innerHTML = `<h3>任务</h3>${table(downloads.jobs || [], [
     { label: "job_id", render: (row) => `<code>${esc(row.job_id)}</code>` },
@@ -650,6 +690,19 @@ async function loadDoiDownloads() {
     { label: "原因", key: "failure_reason" },
     { label: "更新时间", key: "updated_at" },
   ])}`;
+}
+
+function doiSettingsPayload(form) {
+  return {
+    out_dir: form.out_dir.value,
+    max_items: Number(form.max_items.value || 10),
+    manual_login_timeout_seconds: Number(form.manual_login_timeout_seconds.value || 900),
+    headed: Boolean(form.headed.checked),
+    allow_manual_login: Boolean(form.allow_manual_login.checked),
+    fast_mode: Boolean(form.fast_mode.checked),
+    use_deepseek: Boolean(form.use_deepseek.checked),
+    auto_ingest: Boolean(form.auto_ingest.checked),
+  };
 }
 
 async function loadChunks(sourceId) {
@@ -921,16 +974,22 @@ async function init() {
     const form = event.currentTarget;
     const payload = {
       doi_text: form.doi_text.value,
-      out_dir: form.out_dir.value,
-      max_items: Number(form.max_items.value || 10),
-      manual_login_timeout_seconds: Number(form.manual_login_timeout_seconds.value || 900),
-      headed: Boolean(form.headed.checked),
-      allow_manual_login: Boolean(form.allow_manual_login.checked),
-      fast_mode: Boolean(form.fast_mode.checked),
-      use_deepseek: Boolean(form.use_deepseek.checked),
-      auto_ingest: Boolean(form.auto_ingest.checked),
+      ...doiSettingsPayload(form),
     };
     const result = await api("/api/doi-downloads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    jsonBox(document.getElementById("doiResult"), result);
+    await loadDoiDownloads();
+    if (payload.auto_ingest) await loadSources();
+  });
+
+  document.getElementById("retryDoiVerificationQueue").addEventListener("click", async () => {
+    const form = document.getElementById("doiForm");
+    const payload = doiSettingsPayload(form);
+    const result = await api("/api/doi-downloads/retry-verification-queue", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

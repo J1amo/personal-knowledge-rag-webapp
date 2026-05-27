@@ -16,7 +16,7 @@ if preferred_python:
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.doi_downloader import run_doi_download_job  # noqa: E402
+from app.doi_downloader import run_doi_download_job, run_doi_verification_queue_job  # noqa: E402
 
 
 def main() -> int:
@@ -41,6 +41,11 @@ def main() -> int:
     parser.add_argument("--auto-ingest", action="store_true", help="Ingest downloaded PDFs into the knowledge base.")
     parser.add_argument("--rebuild-after-ingest", action="store_true", help="Rebuild indexes after optional ingestion.")
     parser.add_argument("--no-deepseek", action="store_true", help="Disable DeepSeek page advice even when DEEPSEEK_API_KEY is set.")
+    parser.add_argument(
+        "--retry-verification-queue",
+        action="store_true",
+        help="Retry the latest DOI values waiting for login or access verification, reusing the persistent access session.",
+    )
     args = parser.parse_args()
 
     parts = []
@@ -48,25 +53,26 @@ def main() -> int:
         parts.extend(args.doi)
     if args.doi_file:
         parts.append(Path(args.doi_file).expanduser().read_text(encoding="utf-8"))
-    if not parts:
+    if not parts and not args.retry_verification_queue:
         parser.error("Provide --doi or --doi-file")
 
-    result = run_doi_download_job(
-        "\n".join(parts),
-        {
-            "out_dir": args.out,
-            "max_items": args.max_items,
-            "headed": args.headed,
-            "allow_manual_login": args.allow_manual_login,
-            "manual_login_timeout_seconds": args.manual_login_timeout_seconds,
-            "fast_mode": args.fast_mode,
-            "auto_ingest": args.auto_ingest,
-            "rebuild_after_ingest": args.rebuild_after_ingest,
-            "use_deepseek": not args.no_deepseek,
-        },
-    )
+    settings = {
+        "out_dir": args.out,
+        "max_items": args.max_items,
+        "headed": args.headed,
+        "allow_manual_login": args.allow_manual_login,
+        "manual_login_timeout_seconds": args.manual_login_timeout_seconds,
+        "fast_mode": args.fast_mode,
+        "auto_ingest": args.auto_ingest,
+        "rebuild_after_ingest": args.rebuild_after_ingest,
+        "use_deepseek": not args.no_deepseek,
+    }
+    if args.retry_verification_queue:
+        result = run_doi_verification_queue_job(settings)
+    else:
+        result = run_doi_download_job("\n".join(parts), settings)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result.get("status") in {"ready", "partial", "stopped"} else 1
+    return 0 if result.get("status") in {"ready", "partial", "stopped", "noop"} else 1
 
 
 if __name__ == "__main__":
