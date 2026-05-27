@@ -33,6 +33,18 @@ http://127.0.0.1:8765
 ./scripts/pkb.sh markdown "生成带证据的研究摘要" --type research_summary
 ```
 
+ACS 期刊追踪：
+
+```bash
+./scripts/pkb.sh acs init
+./scripts/pkb.sh acs run --profile gaa_vertical_ge_si
+./scripts/pkb.sh acs export --format markdown
+./scripts/pkb.sh acs export --format csv
+./scripts/pkb.sh acs mark --doi "10.xxxx/yyyy" --status must_read
+```
+
+该入口使用 OpenAlex 公开元数据和本地 SQLite，不直接抓取 ACS 页面，不绕过登录、验证码、付费墙、403/429 或机构访问提示；CSV 可直接用 Excel 打开。配置见 `config/acs_journals.json` 和 `config/acs_profiles.json`，说明见 `docs/acs_literature_tracker.md`。
+
 结果不准或流程异常时生成 Codex handoff：
 
 ```bash
@@ -92,6 +104,7 @@ LaunchAgent 使用 `scripts/run_server.sh` 前台运行服务，`RunAtLoad=true`
 - `Dashboard`: sources/chunks/papers、后端状态、索引覆盖、最近 ingestion、失败记录。
 - `Upload / Ingest`: 上传单个 PDF 或导入文件夹；选择 domain、topic、sensitivity。
 - `文献发现`: 按主题、关键词、期刊/ISSN 和年份从 OpenAlex 获取可信 DOI 与英文摘要，可选调用本地翻译端点生成中文或中英双语显示。
+- `ACS 期刊追踪 CLI`: 按本地 profile 定期发现 ACS 候选文献，写入 SQLite，按 DOI/title+url 去重，输出 Markdown digest 和 Excel-compatible CSV，并支持 `must_read/read/archived` 等状态标记。
 - `DOI 下载器`: 输入 DOI 或 DOI 列表，通过用户已有合法访问权限下载 PDF，保存 metadata/log，可选加入文档库。
 - `Query`: 分开选择 Retrieval Mode 和 Analysis Model，返回 answer 与 evidence。
 - `Sources / 文档库`: 浏览 document/source 元数据、raw path、hash、chunks，并打开 PDF。
@@ -146,6 +159,9 @@ db/knowledge.sqlite
 - `doi_download_jobs`
 - `doi_download_items`
 - `doi_metadata`
+- `acs_literature_runs`
+- `acs_literature_papers`
+- `acs_literature_run_items`
 
 原始文件是最高级别证据，系统不会自动删除 raw files。`.gitignore` 已排除 `.env`、`data/raw/`、`db/`、`indexes/`、`cache/`、`backups/`。
 

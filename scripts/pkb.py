@@ -54,6 +54,11 @@ def workflow(_args: argparse.Namespace) -> int:
   ./scripts/pkb.sh discover "研究方向" --keywords "关键词1,关键词2" --max-results 8
   ./scripts/pkb.sh open
 
+ACS 期刊追踪：
+  ./scripts/pkb.sh acs run --profile gaa_vertical_ge_si
+  ./scripts/pkb.sh acs export --format markdown
+  ./scripts/pkb.sh acs mark --doi "10.xxxx/yyyy" --status must_read
+
 结果不准或流程异常：
   ./scripts/pkb.sh codex --reason "具体问题"
   ./scripts/pkb.sh codex --audit-id aud_xxx --expected "期望命中的论文/chunk/行为"
@@ -212,6 +217,67 @@ def discover(args: argparse.Namespace) -> int:
     return 0
 
 
+def acs(args: argparse.Namespace) -> int:
+    from app.acs_tracker import (
+        ensure_default_configs,
+        export_digest,
+        mark_paper,
+        run_tracker,
+        tracker_status,
+    )
+
+    if args.acs_command == "init":
+        result = ensure_default_configs(force=args.force)
+    elif args.acs_command == "run":
+        result = run_tracker(
+            profile_name=args.profile,
+            max_results=args.max_results,
+            year_from=args.year_from,
+            year_to=args.year_to,
+        )
+    elif args.acs_command == "export":
+        result = export_digest(
+            output_format=args.format,
+            profile_name=args.profile,
+            output_path=args.output,
+            limit=args.limit,
+        )
+    elif args.acs_command == "status":
+        result = tracker_status()
+    elif args.acs_command == "mark":
+        result = mark_paper(doi=args.doi, paper_key=args.paper_key, status=args.status, notes=args.notes)
+    else:
+        raise ValueError(f"Unknown ACS command: {args.acs_command}")
+
+    if args.json:
+        emit(result, as_json=True)
+    elif args.acs_command == "run":
+        summary = result["summary"]
+        emit(
+            "\n".join(
+                [
+                    f"ACS tracker run ready: {result['run_id']}",
+                    f"- New papers: {summary['created']}",
+                    f"- Updated papers: {summary['updated']}",
+                    f"- Candidates: {summary['result_count']}",
+                ]
+            )
+        )
+    elif args.acs_command == "export":
+        emit(f"ACS export ready: {result['file_path']}")
+    elif args.acs_command == "status":
+        lines = [f"ACS tracker papers: {result['total']}"]
+        for status, count in sorted(result["counts"].items()):
+            lines.append(f"- {status}: {count}")
+        if result["recent_runs"]:
+            latest = result["recent_runs"][0]
+            lines.append(f"Latest run: {latest['run_id']} {latest['status']} {latest['started_at']}")
+        emit("\n".join(lines))
+    else:
+        emit(result)
+    return 0
+
+
 def codex(args: argparse.Namespace) -> int:
     from app.maintenance import generate_codex_repair_from_audit, generate_codex_repair_guidance
 
@@ -282,6 +348,46 @@ def build_parser() -> argparse.ArgumentParser:
     discover_parser.add_argument("--no-translate", action="store_true")
     discover_parser.add_argument("--json", action="store_true")
     discover_parser.set_defaults(func=discover)
+
+    acs_parser = sub.add_parser("acs", help="Track ACS candidate papers from configured research profiles")
+    acs_sub = acs_parser.add_subparsers(dest="acs_command", required=True)
+
+    acs_init = acs_sub.add_parser("init", help="Create default ACS journals and profile config")
+    acs_init.add_argument("--force", action="store_true")
+    acs_init.add_argument("--json", action="store_true")
+    acs_init.set_defaults(func=acs)
+
+    acs_run = acs_sub.add_parser("run", help="Run ACS metadata discovery and save candidates")
+    acs_run.add_argument("--profile", default="gaa_vertical_ge_si")
+    acs_run.add_argument("--max-results", type=int)
+    acs_run.add_argument("--year-from")
+    acs_run.add_argument("--year-to")
+    acs_run.add_argument("--json", action="store_true")
+    acs_run.set_defaults(func=acs)
+
+    acs_export = acs_sub.add_parser("export", help="Export ACS candidates to Markdown or Excel-compatible CSV")
+    acs_export.add_argument("--format", choices=["markdown", "csv"], default="markdown")
+    acs_export.add_argument("--profile")
+    acs_export.add_argument("--output")
+    acs_export.add_argument("--limit", type=int, default=100)
+    acs_export.add_argument("--json", action="store_true")
+    acs_export.set_defaults(func=acs)
+
+    acs_status = acs_sub.add_parser("status", help="Show ACS tracker counts and recent runs")
+    acs_status.add_argument("--json", action="store_true")
+    acs_status.set_defaults(func=acs)
+
+    acs_mark = acs_sub.add_parser("mark", help="Mark an ACS candidate paper status")
+    acs_mark.add_argument("--doi")
+    acs_mark.add_argument("--paper-key")
+    acs_mark.add_argument(
+        "--status",
+        required=True,
+        choices=["new", "maybe_relevant", "highly_relevant", "must_read", "read", "archived"],
+    )
+    acs_mark.add_argument("--notes")
+    acs_mark.add_argument("--json", action="store_true")
+    acs_mark.set_defaults(func=acs)
 
     codex_parser = sub.add_parser("codex", help="Generate a Codex repair handoff")
     codex_parser.add_argument("--reason", default="")

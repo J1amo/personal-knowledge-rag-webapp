@@ -43,6 +43,29 @@ PKB_PYTHON=/path/to/python-with-pymupdf ./scripts/pkb.sh doctor
 
 文献发现来自 OpenAlex 候选元数据；全文下载仍必须遵守用户已有合法访问权限，不绕过登录、验证码、付费墙、403/429 或机构访问提示。
 
+## ACS 期刊追踪
+
+从 ACS 计划书中固化为本项目的稳定入口：
+
+```bash
+./scripts/pkb.sh acs init
+./scripts/pkb.sh acs run --profile gaa_vertical_ge_si
+./scripts/pkb.sh acs status
+./scripts/pkb.sh acs export --format markdown
+./scripts/pkb.sh acs export --format csv
+```
+
+`acs run` 使用 `config/acs_journals.json` 和 `config/acs_profiles.json`，通过 OpenAlex 公共元数据发现候选文章，写入本地 SQLite，并按 DOI 去重；没有 DOI 时按 title + url 生成稳定 key。`csv` 是 Excel-compatible 导出，不依赖 openpyxl。
+
+人工筛选后可标记状态：
+
+```bash
+./scripts/pkb.sh acs mark --doi "10.xxxx/yyyy" --status must_read
+./scripts/pkb.sh acs mark --doi "10.xxxx/yyyy" --status archived --notes "与当前方向无关"
+```
+
+状态只改变本地研究队列，不会自动下载全文。下载或导入全文仍走 DOI 下载器和合法访问边界。
+
 ## 结果不准或流程异常
 
 ```bash

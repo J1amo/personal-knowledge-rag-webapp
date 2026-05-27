@@ -1,0 +1,40 @@
+{
+  "journals": [
+    {
+      "name": "ACS Nano",
+      "terms": [
+        "ACS Nano",
+        "1936-0851"
+      ],
+      "enabled": true,
+      "high_value": true
+    },
+    {
+      "name": "Nano Letters",
+      "terms": [
+        "Nano Letters",
+        "1530-6984"
+      ],
+      "enabled": true,
+      "high_value": true
+    },
+    {
+      "name": "Chemistry of Materials",
+      "terms": [
+        "Chemistry of Materials",
+        "0897-4756"
+      ],
+      "enabled": true,
+      "high_value": false
+    },
+    {
+      "name": "ACS Applied Materials & Interfaces",
+      "terms": [
+        "ACS Applied Materials & Interfaces",
+        "1944-8244"
+      ],
+      "enabled": true,
+      "high_value": false
+    }
+  ]
+}

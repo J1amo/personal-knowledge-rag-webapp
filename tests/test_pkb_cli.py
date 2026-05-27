@@ -56,6 +56,15 @@ class PkbCliTest(unittest.TestCase):
         self.assertIn("pymupdf_available", payload)
         self.assertIn("pytest_available", payload)
 
+    def test_acs_status_cli_uses_local_database(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self.run_pkb("acs", "status", "--json", env=self.env_for(Path(tmp)))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "ready")
+        self.assertEqual(payload["total"], 0)
+        self.assertIn("counts", payload)
+
     def test_codex_generates_repair_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             data_root = Path(tmp)

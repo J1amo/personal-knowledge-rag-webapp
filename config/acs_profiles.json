@@ -1,0 +1,65 @@
+{
+  "profiles": [
+    {
+      "name": "gaa_vertical_ge_si",
+      "topic": "gate-all-around vertical Ge SiGe nanosheet nanowire transistor",
+      "search_query": "gate-all-around transistor",
+      "search_keywords": [
+        "nanosheet",
+        "nanowire"
+      ],
+      "include_keywords": [
+        "gate-all-around",
+        "GAA",
+        "nanosheet",
+        "nanowire",
+        "vertical transistor",
+        "Ge",
+        "SiGe",
+        "core-shell",
+        "selective etching",
+        "ALD",
+        "high-k"
+      ],
+      "strong_keywords": [
+        "gate-all-around",
+        "vertical transistor",
+        "Ge",
+        "SiGe",
+        "nanosheet",
+        "nanowire"
+      ],
+      "strong_combinations": [
+        [
+          "Ge",
+          "gate-all-around"
+        ],
+        [
+          "SiGe",
+          "selective etching"
+        ],
+        [
+          "vertical",
+          "nanowire",
+          "transistor"
+        ],
+        [
+          "core-shell",
+          "junctionless"
+        ],
+        [
+          "nanosheet",
+          "fabrication"
+        ]
+      ],
+      "journal_terms": [
+        "ACS Nano",
+        "Nano Letters",
+        "Chemistry of Materials",
+        "ACS Applied Materials"
+      ],
+      "year_from": 2023,
+      "max_results": 12
+    }
+  ]
+}

@@ -394,6 +394,56 @@ def init_db() -> None:
               metadata_json TEXT NOT NULL DEFAULT '{}',
               updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS acs_literature_runs (
+              run_id TEXT PRIMARY KEY,
+              profile_name TEXT NOT NULL,
+              status TEXT NOT NULL,
+              settings_json TEXT NOT NULL DEFAULT '{}',
+              summary_json TEXT NOT NULL DEFAULT '{}',
+              failure_reason TEXT,
+              started_at TEXT NOT NULL,
+              finished_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS acs_literature_papers (
+              paper_key TEXT PRIMARY KEY,
+              doi TEXT,
+              title TEXT NOT NULL,
+              authors_json TEXT NOT NULL DEFAULT '[]',
+              journal TEXT,
+              year INTEGER,
+              publication_date TEXT,
+              url TEXT NOT NULL,
+              abstract TEXT,
+              source TEXT NOT NULL DEFAULT 'openalex',
+              collected_at TEXT NOT NULL,
+              first_seen_at TEXT NOT NULL,
+              last_seen_at TEXT NOT NULL,
+              relevance_score REAL NOT NULL DEFAULT 0,
+              status TEXT NOT NULL DEFAULT 'new',
+              notes TEXT,
+              matched_keywords_json TEXT NOT NULL DEFAULT '[]',
+              next_action TEXT,
+              metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_acs_literature_doi
+              ON acs_literature_papers(doi)
+              WHERE doi IS NOT NULL AND doi != '';
+            CREATE INDEX IF NOT EXISTS idx_acs_literature_status_score
+              ON acs_literature_papers(status, relevance_score);
+
+            CREATE TABLE IF NOT EXISTS acs_literature_run_items (
+              run_id TEXT NOT NULL,
+              paper_key TEXT NOT NULL,
+              result_rank INTEGER NOT NULL,
+              relevance_score REAL NOT NULL DEFAULT 0,
+              matched_keywords_json TEXT NOT NULL DEFAULT '[]',
+              PRIMARY KEY(run_id, paper_key),
+              FOREIGN KEY(run_id) REFERENCES acs_literature_runs(run_id) ON DELETE CASCADE,
+              FOREIGN KEY(paper_key) REFERENCES acs_literature_papers(paper_key) ON DELETE CASCADE
+            );
             """
         )
         _backfill_research_os_tables(con)
