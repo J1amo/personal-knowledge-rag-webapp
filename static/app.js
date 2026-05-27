@@ -96,6 +96,7 @@ const statusLabel = {
   blocked_by_access: "访问受限",
   blocked_by_captcha: "验证码/安全验证",
   needs_login: "需要登录",
+  manual_wait: "等待手动操作",
   imported: "已导入",
   parsed: "已解析",
   chunked: "已切块",

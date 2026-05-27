@@ -63,6 +63,14 @@ Manual institutional login:
 
 With headed browser mode plus manual waiting enabled, login pages, institutional access pages, CAPTCHA pages, and publisher security verification pages keep the browser open so the user can complete authorized access manually.
 
+If a publisher security page loops inside the automated browser, use the real-browser manual assist mode:
+
+```bash
+./scripts/manual_doi_download_assist.py --doi-file dois.txt --auto-ingest --timeout-seconds 3600
+```
+
+This opens one DOI at a time in the user's normal browser. After the user completes login/verification and downloads the current PDF, the script detects the new PDF, writes the DOI metadata sidecar, optionally ingests it, and continues to the next DOI.
+
 Fast mode, only for small open-access or explicitly confirmed batches:
 
 ```bash

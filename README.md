@@ -204,6 +204,14 @@ python3 -m playwright install chromium
 
 勾选/传入手动等待后，登录页、机构访问页、验证码和出版社安全验证页会保持可见浏览器，等待用户完成合法授权访问；未解决的验证码、429 或可疑流量仍会停止批次。
 
+如果出版社安全验证在自动化浏览器里循环不通过，改用真实浏览器人工接管模式：
+
+```bash
+./scripts/manual_doi_download_assist.py --doi-file dois.txt --auto-ingest --timeout-seconds 3600
+```
+
+该模式每次打开一个 DOI；用户在真实浏览器里完成登录/验证并下载 PDF 后，脚本自动侦测新 PDF、保存 metadata，并按需加入文档库。
+
 默认不自动 ingestion；如需下载后加入文档库：
 
 ```bash
