@@ -93,6 +93,17 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(classify_access_block(200, "https://publisher.test", "Please complete CAPTCHA")[0], "blocked_by_captcha")
         self.assertEqual(classify_access_block(200, "https://idp.test", "Shibboleth sign in MFA required")[0], "needs_login")
 
+    def test_manual_access_wait_covers_institution_access_pages(self) -> None:
+        from app.doi_downloader import resolve_settings, should_wait_for_manual_access
+
+        enabled = resolve_settings({"headed": True, "allow_manual_login": True})
+        disabled = resolve_settings({"headed": True, "allow_manual_login": False})
+
+        self.assertTrue(should_wait_for_manual_access("needs_login", enabled))
+        self.assertTrue(should_wait_for_manual_access("blocked_by_access", enabled))
+        self.assertFalse(should_wait_for_manual_access("blocked_by_captcha", enabled))
+        self.assertFalse(should_wait_for_manual_access("blocked_by_access", disabled))
+
     def test_pdf_save_metadata_sidecar_existing_skip_and_hash(self) -> None:
         from app.doi_downloader import find_existing_download, save_pdf_and_metadata
 

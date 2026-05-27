@@ -38,6 +38,7 @@ STOP_BATCH_STATUSES = {
     "blocked_by_captcha",
     "blocked_by_rate_limit",
 }
+MANUAL_ACCESS_WAIT_STATUSES = {"needs_login", "blocked_by_access"}
 SUCCESS_STATUSES = {"downloaded", "skipped_existing"}
 
 ACCESS_TERMS = (
@@ -253,6 +254,10 @@ def _reason_with_evidence(reason: str | None, diagnostics: dict[str, Any] | None
 def classify_access_block(status_code: int | None, url: str | None, text: str | None) -> tuple[str | None, str | None]:
     state, reason, _diagnostics = _classify_access_block_detail(status_code, url, text)
     return state, reason
+
+
+def should_wait_for_manual_access(state: str | None, settings: DoiDownloadSettings) -> bool:
+    return bool(state in MANUAL_ACCESS_WAIT_STATUSES and settings.allow_manual_login and settings.headed)
 
 
 def publisher_domain(url: str | None) -> str | None:
@@ -614,12 +619,21 @@ class PlaywrightDownloadSession:
                 body = response.body()
                 return DownloadAttempt("downloaded", landing_url, domain, landing_url, body)
             state, reason, diagnostics = _classify_access_block_detail(status_code, landing_url, self._body_text(page))
-            if state == "needs_login" and self.settings.allow_manual_login and self.settings.headed:
+            if should_wait_for_manual_access(state, self.settings):
                 deadline = time.monotonic() + self.settings.manual_login_timeout_seconds
+                waited_seconds = 0.0
                 while time.monotonic() < deadline:
+                    before_sleep = time.monotonic()
                     time.sleep(2)
+                    waited_seconds += time.monotonic() - before_sleep
                     state, reason, diagnostics = _classify_access_block_detail(None, page.url, self._body_text(page))
-                    if state != "needs_login":
+                    diagnostics = {
+                        **diagnostics,
+                        "manual_access_waited": True,
+                        "manual_access_wait_seconds": round(waited_seconds, 1),
+                        "manual_access_wait_statuses": sorted(MANUAL_ACCESS_WAIT_STATUSES),
+                    }
+                    if state not in MANUAL_ACCESS_WAIT_STATUSES:
                         break
             if state and state != "blocked_by_access":
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)

@@ -11,7 +11,8 @@ It does not use an LLM for downloading. It does not bypass access controls.
 - Do not download whole issues, volumes, books, keyword search result sets, or publisher collections.
 - Default concurrency is `1`.
 - Stop on login, MFA, CAPTCHA, 429, suspicious activity, or rate-limit signals.
-- Record per-article access denial or 403 as `blocked_by_access`, save evidence if possible, and continue to the next explicitly supplied DOI without bypassing access controls.
+- When headed mode and manual login waiting are enabled, pause on login pages and institution/access pages so the user can complete their authorized library or publisher login.
+- If manual login waiting is not enabled, or if the article is still inaccessible after the wait, record per-article access denial or 403 as `blocked_by_access`, save evidence if possible, and continue to the next explicitly supplied DOI without bypassing access controls.
 - Save DOI, landing URL, publisher domain, file path, timestamp, status, failure reason, stop policy, and diagnostic signals in logs.
 
 ## Install Playwright
@@ -115,7 +116,7 @@ max 5 items
 default off
 ```
 
-Fast mode is not concurrent and still stops immediately on CAPTCHA, 429, suspicious activity, rate-limit, or login/MFA. Per-article access denial is logged and skipped.
+Fast mode is not concurrent and still stops immediately on CAPTCHA, 429, suspicious activity, or rate-limit. Login/MFA and institution access pages pause only when headed mode and manual login waiting are enabled.
 
 ## Save Layout
 
@@ -163,7 +164,7 @@ When risk signals are detected, the current item is marked with a stop status an
 - `blocked_by_captcha`
 - `blocked_by_rate_limit`
 
-When a single article shows an access-denial or purchase-access page, the item is marked as `blocked_by_access`, diagnostics and snapshots are saved when possible, and the batch continues after the normal article delay.
+When a single article shows an access-denial or purchase-access page, headed mode plus manual login waiting gives the user time to complete authorized school library, institutional, or publisher-account access. If the page is still inaccessible after that wait, the item is marked as `blocked_by_access`, diagnostics and snapshots are saved when possible, and the batch continues after the normal article delay.
 
 If possible, the app saves a screenshot and HTML snapshot under `outputs/doi_download_logs/snapshots/`.
 
