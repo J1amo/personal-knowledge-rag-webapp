@@ -122,9 +122,35 @@ SCHOOL_AUTHORIZED_PLATFORM_RULES: tuple[dict[str, Any], ...] = (
         "metadata_terms": ("american chemical society", "acs"),
     },
     {
+        "name": "AMA Current Titles",
+        "hosts": ("jamanetwork.com", "ama-assn.org"),
+        "metadata_terms": ("american medical association", "jamanetwork", "ama"),
+    },
+    {
+        "name": "American Association for Cancer Research",
+        "hosts": ("aacrjournals.org",),
+        "metadata_terms": ("american association for cancer research", "aacr"),
+    },
+    {
+        "name": "American Mathematical Society Publications",
+        "hosts": ("ams.org", "www.ams.org"),
+        "metadata_terms": ("american mathematical society", "ams"),
+        "campus_only": True,
+    },
+    {
         "name": "American Physical Society Journals",
         "hosts": ("journals.aps.org", "link.aps.org"),
         "metadata_terms": ("american physical society",),
+    },
+    {
+        "name": "Business Source Premier",
+        "hosts": ("ebscohost.com", "search.ebscohost.com"),
+        "metadata_terms": ("business source premier", "ebsco"),
+    },
+    {
+        "name": "Cambridge Core All Books",
+        "hosts": ("cambridge.org",),
+        "metadata_terms": ("cambridge university press", "cambridge core"),
     },
     {
         "name": "Cambridge Journals: 2026 Full Collection",
@@ -132,9 +158,26 @@ SCHOOL_AUTHORIZED_PLATFORM_RULES: tuple[dict[str, Any], ...] = (
         "metadata_terms": ("cambridge university press",),
     },
     {
+        "name": "DOAB: Directory of Open Access Books",
+        "hosts": ("doabooks.org",),
+        "metadata_terms": ("directory of open access books", "doab"),
+        "open_access": True,
+    },
+    {
+        "name": "DOAJ Directory of Open Access Journals",
+        "hosts": ("doaj.org",),
+        "metadata_terms": ("directory of open access journals", "doaj"),
+        "open_access": True,
+    },
+    {
         "name": "Elsevier ScienceDirect Journals",
         "hosts": ("sciencedirect.com", "www.sciencedirect.com"),
         "metadata_terms": ("elsevier",),
+    },
+    {
+        "name": "Emerald A-Z Complete All Journals",
+        "hosts": ("emerald.com", "emeraldinsight.com", "www.emerald.com"),
+        "metadata_terms": ("emerald",),
     },
     {
         "name": "HighWire Press",
@@ -158,9 +201,55 @@ SCHOOL_AUTHORIZED_PLATFORM_RULES: tuple[dict[str, Any], ...] = (
         "open_access_only": True,
     },
     {
+        "name": "Journals@Ovid Ovid Full Text",
+        "hosts": ("ovid.com", "ovidsp.ovid.com"),
+        "metadata_terms": ("ovid",),
+    },
+    {
+        "name": "JSTOR Arts & Sciences I-VII Archive Collection",
+        "hosts": ("jstor.org", "www.jstor.org"),
+        "metadata_terms": ("jstor",),
+    },
+    {
+        "name": "Kinokuniya Digital Library (KinoDen)",
+        "hosts": ("kinoden.kinokuniya.co.jp",),
+        "metadata_terms": ("kinokuniya", "kinoden"),
+    },
+    {
+        "name": "Maruzen eBook Library",
+        "hosts": ("elib.maruzen.co.jp",),
+        "metadata_terms": ("maruzen ebook library", "maruzen"),
+    },
+    {
+        "name": "MEDLINE with Full Text",
+        "hosts": ("ebscohost.com", "search.ebscohost.com"),
+        "metadata_terms": ("medline with full text", "medline"),
+        "campus_only": True,
+    },
+    {
+        "name": "National Academy of Sciences (U.S.)",
+        "hosts": ("pnas.org", "www.pnas.org"),
+        "metadata_terms": ("national academy of sciences", "pnas"),
+    },
+    {
         "name": "Nature Journals Online",
         "hosts": ("nature.com", "www.nature.com"),
         "metadata_terms": ("springer nature", "nature portfolio"),
+    },
+    {
+        "name": "NII-REO Cambridge University Press",
+        "hosts": ("reo.nii.ac.jp", "nii.ac.jp"),
+        "metadata_terms": ("nii-reo", "cambridge university press"),
+    },
+    {
+        "name": "NII-REO: OUP Archive Full Collection",
+        "hosts": ("reo.nii.ac.jp", "nii.ac.jp"),
+        "metadata_terms": ("nii-reo", "oxford university press"),
+    },
+    {
+        "name": "OECD iLibrary",
+        "hosts": ("oecd-ilibrary.org", "www.oecd-ilibrary.org"),
+        "metadata_terms": ("oecd",),
     },
     {
         "name": "Oxford Journals Full Collection - JUSTICE",
@@ -168,9 +257,34 @@ SCHOOL_AUTHORIZED_PLATFORM_RULES: tuple[dict[str, Any], ...] = (
         "metadata_terms": ("oxford university press",),
     },
     {
+        "name": "Oxford University Press Books All Titles",
+        "hosts": ("academic.oup.com", "oxford.universitypressscholarship.com"),
+        "metadata_terms": ("oxford university press",),
+    },
+    {
+        "name": "Project Euclid Prime",
+        "hosts": ("projecteuclid.org",),
+        "metadata_terms": ("project euclid",),
+    },
+    {
+        "name": "PROLA - Physical Review Online Archive",
+        "hosts": ("journals.aps.org", "link.aps.org"),
+        "metadata_terms": ("physical review", "american physical society"),
+    },
+    {
         "name": "ProQuest Central Premium",
         "hosts": ("proquest.com", "www.proquest.com", "search.proquest.com"),
         "metadata_terms": ("proquest",),
+    },
+    {
+        "name": "ProQuest Dissertations & Theses Global",
+        "hosts": ("proquest.com", "www.proquest.com", "search.proquest.com"),
+        "metadata_terms": ("proquest dissertations", "proquest"),
+    },
+    {
+        "name": "ProQuest Ebook Central",
+        "hosts": ("ebookcentral.proquest.com", "proquest.com", "www.proquest.com"),
+        "metadata_terms": ("proquest ebook central", "proquest"),
     },
     {
         "name": "PubMed Central",
@@ -217,9 +331,36 @@ SCHOOL_AUTHORIZED_PLATFORM_RULES: tuple[dict[str, Any], ...] = (
         "metadata_terms": ("taylor & francis", "taylor and francis"),
     },
     {
+        "name": "Taylor & Francis eBooks A-Z",
+        "hosts": ("taylorfrancis.com", "www.taylorfrancis.com"),
+        "metadata_terms": ("taylor & francis", "taylor and francis"),
+    },
+    {
+        "name": "U.S. Federal Government Documents (from US GPO)",
+        "hosts": ("govinfo.gov", "www.govinfo.gov", "gpo.gov"),
+        "metadata_terms": ("u.s. government publishing office", "government publishing office", "gpo"),
+        "open_access": True,
+    },
+    {
+        "name": "Web of Science",
+        "hosts": ("webofscience.com", "www.webofscience.com"),
+        "metadata_terms": ("web of science",),
+    },
+    {
         "name": "Wiley Online Library Database Model 2026",
         "hosts": ("onlinelibrary.wiley.com",),
         "metadata_terms": ("wiley",),
+    },
+    {
+        "name": "情報学広場：情報処理学会電子図書館",
+        "hosts": ("ipsj.ixsq.nii.ac.jp", "ipsj.or.jp"),
+        "metadata_terms": ("information processing society of japan", "ipsj", "情報処理学会"),
+        "campus_only": True,
+    },
+    {
+        "name": "最新看護索引Web",
+        "hosts": ("jamas.or.jp",),
+        "metadata_terms": ("最新看護索引", "jamas"),
     },
 )
 RATE_LIMIT_TERMS = ("too many requests", "rate limit", "suspicious activity", "unusual traffic")
