@@ -181,10 +181,37 @@ class ChromeHandoffDownloadSession:
                 return DownloadAttempt("failed", page.url, domain, None, None, "No reliable PDF link found", screenshot, html)
 
             pdf_url = links[0]["href"]
-            pdf_response = self.context.request.get(pdf_url, timeout=60000)
-            pdf_body = pdf_response.body()
-            pdf_text = pdf_body[:3000].decode("utf-8", errors="ignore")
-            state, reason, diagnostics = _classify_access_block_detail(pdf_response.status, pdf_url, pdf_text)
+            pdf_body = None
+            request_status = None
+            request_text = ""
+            request_content_type = ""
+            try:
+                pdf_response = self.context.request.get(pdf_url, timeout=60000)
+                request_status = pdf_response.status
+                request_content_type = (pdf_response.headers.get("content-type", "") or "").lower()
+                request_body = pdf_response.body()
+                request_text = request_body[:3000].decode("utf-8", errors="ignore")
+                if "application/pdf" in request_content_type or request_body.startswith(b"%PDF"):
+                    pdf_body = request_body
+            except Exception:
+                pdf_body = None
+
+            if pdf_body is None:
+                # Some publishers reject API-style fetches but allow the real browser page after login.
+                nav_response = page.goto(pdf_url, wait_until="domcontentloaded", timeout=60000)
+                time.sleep(1)
+                if nav_response:
+                    browser_body = nav_response.body()
+                    browser_content_type = (nav_response.headers.get("content-type", "") or "").lower()
+                    if "application/pdf" in browser_content_type or browser_body.startswith(b"%PDF"):
+                        pdf_body = browser_body
+
+            if pdf_body is not None:
+                return DownloadAttempt("downloaded", page.url, domain, pdf_url, pdf_body)
+
+            state, reason, diagnostics = _classify_access_block_detail(request_status, pdf_url, request_text)
+            if not state:
+                state, reason, diagnostics = _classify_access_block_detail(None, page.url, self._body_text(page))
             if state:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
                 return DownloadAttempt(
@@ -198,10 +225,7 @@ class ChromeHandoffDownloadSession:
                     html,
                     diagnostics,
                 )
-            content_type = (pdf_response.headers.get("content-type", "") or "").lower()
-            if "application/pdf" not in content_type and not pdf_body.startswith(b"%PDF"):
-                return DownloadAttempt("failed", page.url, domain, pdf_url, None, "PDF link did not return a PDF")
-            return DownloadAttempt("downloaded", page.url, domain, pdf_url, pdf_body)
+            return DownloadAttempt("failed", page.url, domain, pdf_url, None, "PDF link did not return a PDF")
         except Exception as exc:
             screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
             return DownloadAttempt(
