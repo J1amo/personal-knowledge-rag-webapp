@@ -5,6 +5,7 @@ import os
 import random
 import re
 import shutil
+import subprocess
 import time
 import uuid
 import urllib.error
@@ -16,6 +17,7 @@ from html.parser import HTMLParser
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
+from xml.etree import ElementTree as ET
 
 from . import config
 from .db import connect, init_db, json_dumps, json_loads, utc_now
@@ -38,13 +40,13 @@ PROFILE_DIR = config.CACHE_DIR / "browser_profiles" / "doi_downloader"
 LOG_DIR = config.OUTPUT_DIR / "doi_download_logs"
 SNAPSHOT_DIR = LOG_DIR / "snapshots"
 SERIALS_SOLUTIONS_BASE_URL = "https://jn2xs2wb8u.search.serialssolutions.com/"
+SERIALS_SOLUTIONS_XML_BASE_URL = "http://jn2xs2wb8u.openurl.xml.serialssolutions.com/openurlxml"
 SERIALS_SOLUTIONS_LIB_HASH = "JN2XS2WB8U"
 OPENALEX_WORKS_BASE_URL = "https://api.openalex.org/works/"
 CROSSREF_MAILTO = "support@localhost"
 CROSSREF_USER_AGENT = "personal-research-os-doi-downloader/0.1"
 
 STOP_BATCH_STATUSES = {
-    "needs_login",
     "blocked_by_captcha",
     "blocked_by_rate_limit",
 }
@@ -741,15 +743,19 @@ def _is_open_access_candidate(candidate: dict[str, Any]) -> bool:
     source = str(candidate.get("source") or "").lower()
     return (
         _is_public_fulltext_host(host)
-        or source in {"hal_api", "openalex"}
+        or source == "hal_api"
+        or (source == "openalex" and _is_probable_public_pdf_or_repository_url(str(candidate.get("href") or "")))
         or any(term in label for term in ("open access", "オープンアクセス", "pubmed central"))
     )
 
 
 def _candidate_policy(candidate: dict[str, Any], metadata: dict[str, Any] | None) -> dict[str, Any]:
     url_platform = authorized_platform_for_url(str(candidate.get("href") or ""))
+    serials_platform = _platform_match_by_text(
+        _lower_terms(candidate.get("serials_provider"), candidate.get("serials_database"), candidate.get("text"))
+    )
     metadata_platform = authorized_platform_for_metadata(metadata)
-    platform = url_platform or metadata_platform
+    platform = url_platform or serials_platform or metadata_platform
     open_access = _is_open_access_candidate(candidate)
     allowed = bool(open_access or platform)
     reason = None
@@ -792,6 +798,17 @@ def serials_solutions_lookup_url(doi: str, language: str = "ja") -> str:
     return SERIALS_SOLUTIONS_BASE_URL + "?" + query
 
 
+def serials_solutions_xml_lookup_url(doi: str) -> str:
+    query = urllib.parse.urlencode(
+        {
+            "version": "1.0",
+            "rft.genre": "article",
+            "rft_id": f"info:doi/{doi.lower()}",
+        }
+    )
+    return SERIALS_SOLUTIONS_XML_BASE_URL + "?" + query
+
+
 def _decode_serials_href(href: str) -> str:
     url = urllib.parse.urljoin(SERIALS_SOLUTIONS_BASE_URL, href)
     parsed = urllib.parse.urlparse(url)
@@ -804,6 +821,18 @@ def _decode_serials_href(href: str) -> str:
 
 def _is_public_fulltext_host(host: str) -> bool:
     return host in LINK_RESOLVER_PUBLIC_HOSTS or host.endswith(".hal.science")
+
+
+def _is_probable_public_pdf_or_repository_url(url: str | None) -> bool:
+    if not url:
+        return False
+    target = _proxy_target_url(url) or url
+    host = publisher_domain(target) or ""
+    if host in {"doi.org", "dx.doi.org"}:
+        return False
+    parsed = urllib.parse.urlparse(target)
+    path = parsed.path.lower()
+    return _is_public_fulltext_host(host) or path.endswith(".pdf") or "/pdf" in path
 
 
 def _prefer_direct_public_url(url: str) -> str:
@@ -855,6 +884,55 @@ def parse_serials_solutions_candidates(html_text: str) -> list[dict[str, Any]]:
                 "source": "serials_solutions",
                 "priority": priority,
                 "publisher_domain": publisher_domain(url),
+            }
+        )
+    return sorted(candidates, key=lambda item: item["priority"])
+
+
+SERIALS_XML_NS = {
+    "dc": "http://purl.org/dc/elements/1.1/",
+    "ss": "http://xml.serialssolutions.com/ns/openurl/v1.0",
+}
+
+
+def parse_serials_solutions_xml_candidates(xml_text: str) -> list[dict[str, Any]]:
+    try:
+        root = ET.fromstring(xml_text or "")
+    except ET.ParseError:
+        return []
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for link_group in root.findall(".//ss:linkGroup[@type='holding']", SERIALS_XML_NS):
+        provider = link_group.findtext(".//ss:providerName", default="", namespaces=SERIALS_XML_NS)
+        database = link_group.findtext(".//ss:databaseName", default="", namespaces=SERIALS_XML_NS)
+        article_url = ""
+        for url_el in link_group.findall("ss:url", SERIALS_XML_NS):
+            if url_el.attrib.get("type") == "article":
+                article_url = (url_el.text or "").strip()
+                break
+        if not article_url:
+            continue
+        url = _prefer_direct_public_url(article_url)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        host = publisher_domain(url) or ""
+        target_host = publisher_domain(_proxy_target_url(url)) or host
+        priority = 4
+        if _is_public_fulltext_host(target_host):
+            priority = 1
+        elif provider.lower() in {"directory of open access journals", "national library of medicine"}:
+            priority = 2
+        candidates.append(
+            {
+                "href": url,
+                "text": f"{database or provider} article",
+                "source": "serials_solutions_xml",
+                "priority": priority,
+                "publisher_domain": host,
+                "target_domain": target_host,
+                "serials_provider": provider,
+                "serials_database": database,
             }
         )
     return sorted(candidates, key=lambda item: item["priority"])
@@ -937,6 +1015,22 @@ def _expand_public_repository_candidates(candidates: list[dict[str, Any]]) -> li
 
 
 def fetch_serials_solutions_candidates(doi: str, timeout: int = 25) -> list[dict[str, Any]]:
+    xml_url = serials_solutions_xml_lookup_url(doi)
+    xml_request = urllib.request.Request(
+        xml_url,
+        headers={"User-Agent": CROSSREF_USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(xml_request, timeout=timeout) as response:  # nosec - configured library link resolver
+            xml_text = response.read().decode("utf-8", "replace")
+        xml_candidates = parse_serials_solutions_xml_candidates(xml_text)
+        for candidate in xml_candidates:
+            candidate["lookup_url"] = xml_url
+        if xml_candidates:
+            return _expand_public_repository_candidates(xml_candidates)
+    except Exception:
+        pass
+
     url = serials_solutions_lookup_url(doi)
     request = urllib.request.Request(
         url,
@@ -966,9 +1060,15 @@ def parse_openalex_candidates(doi: str, json_text: str) -> list[dict[str, Any]]:
     seen: set[str] = set()
     lookup_url = openalex_lookup_url(doi)
 
-    def add(url: Any, text: str, priority: int) -> None:
+    def add(url: Any, text: str, priority: int, *, allow_landing: bool = False) -> None:
         if not isinstance(url, str) or not url.startswith(("http://", "https://")):
             return
+        if not _is_probable_public_pdf_or_repository_url(url):
+            return
+        if allow_landing:
+            target = _proxy_target_url(url) or url
+            if not _is_public_fulltext_host(publisher_domain(target) or ""):
+                return
         if url in seen:
             return
         seen.add(url)
@@ -994,7 +1094,7 @@ def parse_openalex_candidates(doi: str, json_text: str) -> list[dict[str, Any]]:
             locations.append(location)
     for location in locations:
         add(location.get("pdf_url"), "OpenAlex PDF URL", 12)
-        add(location.get("landing_page_url"), "OpenAlex landing URL", 22)
+        add(location.get("landing_page_url"), "OpenAlex landing URL", 22, allow_landing=True)
     return sorted(candidates, key=lambda item: item["priority"])
 
 
@@ -1009,6 +1109,23 @@ def fetch_openalex_candidates(doi: str, timeout: int = 15) -> list[dict[str, Any
             return parse_openalex_candidates(doi, response.read().decode("utf-8", "replace"))
     except Exception:
         return []
+
+
+def known_public_pdf_candidates(doi: str, metadata: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    normalized = doi.lower().strip()
+    candidates: list[dict[str, Any]] = []
+    if normalized.startswith("10.1186/"):
+        href = f"https://link.springer.com/content/pdf/{normalized}.pdf"
+        candidates.append(
+            {
+                "href": href,
+                "text": "Springer Open PDF",
+                "source": "known_public_pdf",
+                "priority": 0,
+                "publisher_domain": publisher_domain(href),
+            }
+        )
+    return candidates
 
 
 def no_authorized_landing_attempt(doi: str, metadata: dict[str, Any] | None = None) -> DownloadAttempt:
@@ -1107,11 +1224,11 @@ def _expand_tsukuba_proxy_candidates(candidates: list[dict[str, Any]]) -> list[d
 
 
 def doi_landing_candidates(
-    doi: str, metadata: dict[str, Any] | None = None, *, include_direct: bool = True
+    doi: str, metadata: dict[str, Any] | None = None, *, include_direct: bool = False
 ) -> list[dict[str, Any]]:
     candidates = [
         annotated
-        for candidate in fetch_serials_solutions_candidates(doi)
+        for candidate in [*known_public_pdf_candidates(doi, metadata), *fetch_serials_solutions_candidates(doi)]
         for annotated in [_annotate_candidate_policy(candidate, metadata)]
         if annotated["policy"]["allowed"]
     ]
@@ -1631,6 +1748,34 @@ def pdf_links_from_html_snapshot(html: str | None, base_url: str | None = None) 
     if not html:
         return []
     links: list[dict[str, str]] = []
+    for meta_match in re.finditer(
+        r"<meta[^>]+(?:name|property)=[\"']citation_pdf_url[\"'][^>]+content=[\"']([^\"']+)[\"']",
+        html,
+        flags=re.IGNORECASE,
+    ):
+        _append_unique_pdf_link(links, meta_match.group(1), "citation_pdf_url", "meta", base_url)
+    for meta_match in re.finditer(
+        r"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+(?:name|property)=[\"']citation_pdf_url[\"']",
+        html,
+        flags=re.IGNORECASE,
+    ):
+        _append_unique_pdf_link(links, meta_match.group(1), "citation_pdf_url", "meta", base_url)
+    collector = _AnchorCollector()
+    collector.feed(html)
+    for anchor in collector.anchors:
+        href = anchor.get("href")
+        text = anchor.get("text", "")
+        lowered_href = str(href or "").lower()
+        lowered_text = text.lower()
+        if (
+            lowered_href.endswith(".pdf")
+            or "/pdf" in lowered_href
+            or lowered_text == "pdf"
+            or "download pdf" in lowered_text
+            or "article pdf" in lowered_text
+            or "view pdf" in lowered_text
+        ):
+            _append_unique_pdf_link(links, href, text, "link", base_url)
     manuscript_match = re.search(r'"openManuscriptUrl"\s*:\s*"([^"]+)"', html)
     if manuscript_match:
         _append_unique_pdf_link(
@@ -1680,6 +1825,89 @@ def merge_pdf_links(*groups: list[dict[str, str]]) -> list[dict[str, str]]:
     return merged
 
 
+def _download_public_pdf_over_http(
+    url: str,
+    candidate: dict[str, Any],
+    *,
+    timeout: int = 45,
+    visited: set[str] | None = None,
+) -> DownloadAttempt:
+    visited = visited or set()
+    if url in visited:
+        return DownloadAttempt("failed", url, publisher_domain(url), None, None, "Repeated public PDF candidate URL")
+    visited.add(url)
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": CROSSREF_USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec - explicit public/OA candidate URL
+            final_url = response.geturl()
+            content_type = (response.headers.get("content-type") or "").lower()
+            body = response.read()
+    except Exception as exc:
+        return DownloadAttempt("failed", url, publisher_domain(url), None, None, str(exc))
+    domain = publisher_domain(final_url)
+    diagnostics = {"landing_candidate": candidate, "http_download": True, "content_type": content_type}
+    if "application/pdf" in content_type or body.startswith(b"%PDF"):
+        return DownloadAttempt("downloaded", final_url, domain, final_url, body, diagnostics=diagnostics)
+    curl_attempt = _download_public_pdf_with_curl(final_url, candidate, diagnostics)
+    if curl_attempt:
+        return curl_attempt
+    if "text/html" in content_type:
+        html = body.decode("utf-8", "replace")
+        for link in pdf_links_from_html_snapshot(html, final_url):
+            href = link.get("href")
+            if href and _is_probable_public_pdf_or_repository_url(href):
+                return _download_public_pdf_over_http(href, {**candidate, "pdf_link_candidate": link}, timeout=timeout, visited=visited)
+    return DownloadAttempt(
+        "failed",
+        final_url,
+        domain,
+        None,
+        None,
+        "Public candidate did not return or expose a PDF",
+        diagnostics=diagnostics,
+    )
+
+
+def _download_public_pdf_with_curl(
+    url: str,
+    candidate: dict[str, Any],
+    diagnostics: dict[str, Any],
+    *,
+    timeout: int = 45,
+) -> DownloadAttempt | None:
+    if not _is_probable_public_pdf_or_repository_url(url) or shutil.which("curl") is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "curl",
+                "--location",
+                "--silent",
+                "--show-error",
+                "--max-time",
+                str(timeout),
+                "--user-agent",
+                "Mozilla/5.0",
+                "--header",
+                "Accept: application/pdf,*/*;q=0.8",
+                url,
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout + 5,
+        )
+    except Exception:
+        return None
+    if result.returncode == 0 and result.stdout.startswith(b"%PDF"):
+        curl_diagnostics = {**diagnostics, "curl_fallback": True}
+        return DownloadAttempt("downloaded", url, publisher_domain(url), url, result.stdout, diagnostics=curl_diagnostics)
+    return None
+
+
 class PlaywrightDownloadSession:
     def __init__(self, settings: DoiDownloadSettings):
         self.settings = settings
@@ -1725,6 +1953,8 @@ class PlaywrightDownloadSession:
         landing_url = None
         target_url = str(candidate.get("href") or f"https://doi.org/{doi}")
         try:
+            if _is_probable_public_pdf_or_repository_url(target_url):
+                return _download_public_pdf_over_http(target_url, candidate)
             response = page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             self._jitter()
             landing_url = page.url
@@ -2124,7 +2354,7 @@ def run_doi_download_job(
         "completed_batches": _batch_count(processed_count, batch_size),
         "stopped_reason": stop_reason,
         "stop_batch_statuses": sorted(STOP_BATCH_STATUSES),
-        "continue_item_statuses": ["blocked_by_access"],
+        "continue_item_statuses": ["blocked_by_access", "needs_login"],
         "log_dir": str(LOG_DIR),
         "profile_dir": str(PROFILE_DIR),
         "settings": asdict(resolved),

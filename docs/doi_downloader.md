@@ -55,13 +55,15 @@ DOI list:
 
 `--max-items` is the per-batch size. A single job still processes the full deduped DOI list, splitting it into batches of at most that many DOI values.
 
+The downloader first checks Tsukuba's Serials Solutions XML resolver, known public PDF templates, public repositories such as HAL/PubMed Central/Zenodo, and explicit OpenAlex PDF candidates. It does not use a direct publisher browser fallback when the resolver has no holding and no reliable open PDF candidate is available.
+
 Visible browser debugging and manual institutional login:
 
 ```bash
 ./scripts/download_by_doi.py --doi-file dois.txt --out data/raw/papers --headed --allow-manual-login --manual-login-timeout-seconds 900
 ```
 
-By default, DOI downloads run in the background and should not open a visible automation browser. `--headed` is an explicit debug mode that shows the Playwright browser for the whole run. Only when both `--headed` and manual waiting are enabled can login and institutional access pages keep that visible browser open so the user can complete authorized access manually. CAPTCHA and publisher security verification pages are recorded as blocked states instead of being driven repeatedly by the automated browser.
+By default, DOI downloads run in the background and should not open a visible automation browser. `--headed` is an explicit debug mode that shows the Playwright browser for the whole run. Only when both `--headed` and manual waiting are enabled can login and institutional access pages keep that visible browser open so the user can complete authorized access manually. Login pages are recorded as `needs_login` and the batch continues to later DOI values. CAPTCHA and publisher security verification pages are recorded as blocked states instead of being driven repeatedly by the automated browser.
 
 If a publisher security page loops inside the automated browser, use the real-browser manual assist mode:
 

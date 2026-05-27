@@ -196,13 +196,15 @@ python3 -m playwright install chromium
 
 `--max-items` 表示每批最多处理多少个 DOI；同一次任务会按批处理完整的去重 DOI 列表。
 
+下载器优先走筑波 Serials Solutions XML resolver、已知开放 PDF 模板、HAL/PubMed Central/Zenodo 等公共入口和 OpenAlex 明确 PDF 候选；只有这些路径不足时才进入浏览器候选。resolver 没有馆藏且没有可靠开放 PDF 的 DOI 不再默认直连 publisher 页面。
+
 可见浏览器调试/需要机构登录时：
 
 ```bash
 ./scripts/download_by_doi.py --doi-file dois.txt --headed --allow-manual-login --manual-login-timeout-seconds 900
 ```
 
-默认 DOI 下载在后台执行，不应该打开可见自动化浏览器。`--headed` 是显式调试模式，会全程显示 Playwright 浏览器；只有同时启用 `--headed` 和手动等待时，登录页和机构访问页才会保持这个可见浏览器，等待用户完成合法授权访问。验证码和出版社安全验证页会记录为阻断状态，不再让自动化浏览器反复冲撞。未解决的验证码、429 或可疑流量仍会停止批次。
+默认 DOI 下载在后台执行，不应该打开可见自动化浏览器。`--headed` 是显式调试模式，会全程显示 Playwright 浏览器；只有同时启用 `--headed` 和手动等待时，登录页和机构访问页才会保持这个可见浏览器，等待用户完成合法授权访问。登录页会记录为 `needs_login` 并继续处理后续 DOI；验证码和出版社安全验证页会记录为阻断状态，不再让自动化浏览器反复冲撞。未解决的验证码、429 或可疑流量仍会停止批次。
 
 如果出版社安全验证在自动化浏览器里循环不通过，改用真实浏览器人工接管模式：
 

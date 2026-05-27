@@ -346,6 +346,25 @@ class DoiDownloaderTest(unittest.TestCase):
             "https://www-sciencedirect-com.tsukuba.idm.oclc.org/science/article/pii/S0038110122003239/pdfft?md5=abc123&pid=1-s2.0-S0038110122003239-main.pdf",
         )
 
+    def test_html_snapshot_extracts_public_pdf_meta_and_links(self) -> None:
+        from app.doi_downloader import pdf_links_from_html_snapshot
+
+        html = """
+        <meta name="citation_pdf_url" content="/articles/PMC4837198/pdf/11671_2016_Article_1396.pdf">
+        <a href="/download/article.pdf">Download PDF</a>
+        <a href="javascript:void(0)">PDF</a>
+        """
+
+        links = pdf_links_from_html_snapshot(html, "https://pmc.ncbi.nlm.nih.gov/articles/PMC4837198/")
+
+        self.assertEqual(
+            [item["href"] for item in links],
+            [
+                "https://pmc.ncbi.nlm.nih.gov/articles/PMC4837198/pdf/11671_2016_Article_1396.pdf",
+                "https://pmc.ncbi.nlm.nih.gov/download/article.pdf",
+            ],
+        )
+
     def test_serials_solutions_candidates_keep_only_fulltext_routes(self) -> None:
         from app.doi_downloader import parse_serials_solutions_candidates, serials_solutions_lookup_url
 
@@ -365,6 +384,68 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual([item["text"] for item in candidates], ["フルテキストを見る", "オープンアクセスバージョンを入手"])
         self.assertEqual(candidates[0]["publisher_domain"], "tsukuba.idm.oclc.org")
         self.assertEqual(candidates[1]["publisher_domain"], "hal.science")
+
+    def test_serials_solutions_xml_candidates_use_authorized_article_links(self) -> None:
+        from app.doi_downloader import (
+            parse_serials_solutions_xml_candidates,
+            serials_solutions_xml_lookup_url,
+        )
+
+        lookup_url = serials_solutions_xml_lookup_url("10.1021/acs.nanolett.5b04038")
+        self.assertTrue(lookup_url.startswith("http://jn2xs2wb8u.openurl.xml.serialssolutions.com/openurlxml?"))
+        self.assertIn("rft_id=info%3Adoi%2F10.1021%2Facs.nanolett.5b04038", lookup_url)
+
+        xml = """
+        <ssopenurl:openURLResponse
+          xmlns:dc="http://purl.org/dc/elements/1.1/"
+          xmlns:ssopenurl="http://xml.serialssolutions.com/ns/openurl/v1.0">
+          <ssopenurl:results>
+            <ssopenurl:result format="journal">
+              <ssopenurl:citation><dc:title>Article</dc:title></ssopenurl:citation>
+              <ssopenurl:linkGroups>
+                <ssopenurl:linkGroup type="holding">
+                  <ssopenurl:holdingData>
+                    <ssopenurl:providerName>American Chemical Society</ssopenurl:providerName>
+                    <ssopenurl:databaseName>American Chemical Society Journals</ssopenurl:databaseName>
+                  </ssopenurl:holdingData>
+                  <ssopenurl:url type="source">https://tsukuba.idm.oclc.org/login?url=https://pubs.acs.org/action/showPublications</ssopenurl:url>
+                  <ssopenurl:url type="article">https://tsukuba.idm.oclc.org/login?url=https://pubs.acs.org/doi/10.1021/acs.nanolett.5b04038</ssopenurl:url>
+                </ssopenurl:linkGroup>
+              </ssopenurl:linkGroups>
+            </ssopenurl:result>
+          </ssopenurl:results>
+        </ssopenurl:openURLResponse>
+        """
+
+        candidates = parse_serials_solutions_xml_candidates(xml)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["source"], "serials_solutions_xml")
+        self.assertEqual(candidates[0]["publisher_domain"], "tsukuba.idm.oclc.org")
+        self.assertEqual(candidates[0]["target_domain"], "pubs.acs.org")
+        self.assertEqual(candidates[0]["serials_database"], "American Chemical Society Journals")
+
+    def test_serials_solutions_xml_unwraps_public_article_links(self) -> None:
+        from app.doi_downloader import parse_serials_solutions_xml_candidates
+
+        xml = """
+        <ssopenurl:openURLResponse xmlns:ssopenurl="http://xml.serialssolutions.com/ns/openurl/v1.0">
+          <ssopenurl:linkGroup type="holding">
+            <ssopenurl:holdingData>
+              <ssopenurl:providerName>National Library of Medicine</ssopenurl:providerName>
+              <ssopenurl:databaseName>PubMed Central</ssopenurl:databaseName>
+            </ssopenurl:holdingData>
+            <ssopenurl:url type="article">https://tsukuba.idm.oclc.org/login?url=https://www.ncbi.nlm.nih.gov/pmc/articles/doi/10.1186/s11671-016-1396-7</ssopenurl:url>
+          </ssopenurl:linkGroup>
+        </ssopenurl:openURLResponse>
+        """
+
+        candidates = parse_serials_solutions_xml_candidates(xml)
+        self.assertEqual(
+            candidates[0]["href"],
+            "https://www.ncbi.nlm.nih.gov/pmc/articles/doi/10.1186/s11671-016-1396-7",
+        )
+        self.assertEqual(candidates[0]["priority"], 1)
+        self.assertEqual(candidates[0]["publisher_domain"], "ncbi.nlm.nih.gov")
 
     def test_serials_solutions_unwraps_public_fulltext_proxy_links(self) -> None:
         from app.doi_downloader import parse_serials_solutions_candidates
@@ -423,6 +504,25 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(results[0]["source"], "openalex")
         self.assertEqual(len({item["href"] for item in results}), len(results))
 
+    def test_openalex_candidates_ignore_doi_landing_pages(self) -> None:
+        from app.doi_downloader import parse_openalex_candidates
+
+        payload = {
+            "open_access": {"oa_url": "https://doi.org/10.1109/ted.2023.3268249"},
+            "primary_location": {"landing_page_url": "https://doi.org/10.1109/ted.2023.3268249"},
+            "locations": [
+                {"landing_page_url": "https://ieeexplore.ieee.org/document/101234"},
+                {"pdf_url": "https://hal.science/hal-04296517/file/FINAL%20VERSION.pdf"},
+            ],
+        }
+
+        results = parse_openalex_candidates("10.1109/ted.2023.3268249", json.dumps(payload))
+
+        self.assertEqual(
+            [item["href"] for item in results],
+            ["https://hal.science/hal-04296517/file/FINAL%20VERSION.pdf"],
+        )
+
     def test_doi_landing_candidates_append_direct_fallback(self) -> None:
         from app.doi_downloader import doi_landing_candidates
 
@@ -438,7 +538,11 @@ class DoiDownloaderTest(unittest.TestCase):
                 }
             ],
         ):
-            candidates = doi_landing_candidates("10.1234/test", {"publisher": "American Chemical Society"})
+            candidates = doi_landing_candidates(
+                "10.1234/test",
+                {"publisher": "American Chemical Society"},
+                include_direct=True,
+            )
 
         self.assertEqual(candidates[0]["source"], "serials_solutions")
         self.assertEqual(candidates[-1]["href"], "https://doi.org/10.1234/test")
@@ -462,6 +566,34 @@ class DoiDownloaderTest(unittest.TestCase):
         )
         self.assertEqual(attempt.status, "skipped_not_authorized")
         self.assertIn("不在筑波大学授权数据库列表", attempt.failure_reason or "")
+
+    def test_doi_landing_candidates_do_not_direct_browser_without_resolver_entry(self) -> None:
+        from app.doi_downloader import doi_landing_candidates
+
+        with patch("app.doi_downloader.fetch_serials_solutions_candidates", return_value=[]), patch(
+            "app.doi_downloader.fetch_openalex_candidates", return_value=[]
+        ):
+            candidates = doi_landing_candidates(
+                "10.1088/1361-6463/ad4716",
+                {"publisher": "IOP Publishing"},
+            )
+
+        self.assertEqual(candidates, [])
+
+    def test_doi_landing_candidates_prioritize_known_springer_open_pdf(self) -> None:
+        from app.doi_downloader import doi_landing_candidates
+
+        with patch("app.doi_downloader.fetch_serials_solutions_candidates", return_value=[]):
+            candidates = doi_landing_candidates(
+                "10.1186/s11671-016-1396-7",
+                {"publisher": "Springer Science and Business Media LLC"},
+            )
+
+        self.assertEqual(candidates[0]["source"], "known_public_pdf")
+        self.assertEqual(
+            candidates[0]["href"],
+            "https://link.springer.com/content/pdf/10.1186/s11671-016-1396-7.pdf",
+        )
 
     def test_doi_landing_candidates_use_openalex_before_direct_browser(self) -> None:
         from app.doi_downloader import doi_landing_candidates
@@ -575,6 +707,47 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(result["items"][1]["status"], "downloaded")
         self.assertEqual(result["summary"]["processed_count"], 2)
         self.assertEqual(result["summary"]["unprocessed_count"], 0)
+
+    def test_login_required_item_continues_batch(self) -> None:
+        from app.doi_downloader import DownloadAttempt, run_doi_download_job
+
+        pdf_path = self.root / "mock.pdf"
+        make_pdf(pdf_path, "Mock DOI PDF")
+
+        def fake_runner(doi, _settings, _metadata, _artifacts_dir):
+            if doi.endswith("login"):
+                return DownloadAttempt(
+                    status="needs_login",
+                    landing_url="https://tsukuba.idm.oclc.org/login",
+                    publisher_domain="tsukuba.idm.oclc.org",
+                    failure_reason="Login required",
+                )
+            return DownloadAttempt(
+                status="downloaded",
+                landing_url=f"https://publisher.test/{doi}",
+                publisher_domain="publisher.test",
+                pdf_url=f"https://publisher.test/{doi}.pdf",
+                pdf_bytes=pdf_path.read_bytes(),
+            )
+
+        result = run_doi_download_job(
+            "10.1234/login\n10.1234/downloaded",
+            {"out_dir": str(self.root / "papers"), "max_items": 2},
+            browser_runner=fake_runner,
+            metadata_fetcher=lambda doi: {
+                "doi": doi,
+                "title": "Mock DOI PDF",
+                "authors": ["Grace Hopper"],
+                "year": 2026,
+                "publisher": "publisher.test",
+            },
+            sleeper=lambda _seconds: None,
+        )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual([item["status"] for item in result["items"]], ["needs_login", "downloaded"])
+        self.assertIsNone(result["summary"]["stopped_reason"])
+        self.assertIn("needs_login", result["summary"]["continue_item_statuses"])
 
     def test_max_items_is_batch_size_and_processes_full_list(self) -> None:
         from app.doi_downloader import DownloadAttempt, run_doi_download_job
