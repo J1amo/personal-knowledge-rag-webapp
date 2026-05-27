@@ -633,7 +633,7 @@ def apply_candidate_manual_wait_policy(
     diagnostics = dict(diagnostics or {})
     candidate = candidate or {}
     platform = candidate.get("authorized_platform") or (candidate.get("policy") or {}).get("platform")
-    if state == "needs_login" and isinstance(platform, dict) and platform.get("campus_only"):
+    if state in MANUAL_ACCESS_WAIT_STATUSES and isinstance(platform, dict) and platform.get("campus_only"):
         diagnostics.update(
             {
                 "classification": "blocked_by_access",
