@@ -32,8 +32,10 @@ from app.doi_downloader import (  # noqa: E402
     _save_failure_artifacts,
     apply_candidate_manual_wait_policy,
     doi_landing_candidates,
+    merge_pdf_links,
     no_authorized_landing_attempt,
     parse_doi_list,
+    pdf_links_from_html_snapshot,
     publisher_domain,
     run_doi_download_job,
     should_wait_for_manual_access,
@@ -228,7 +230,7 @@ class ChromeHandoffDownloadSession:
             landing_url = page.url
             domain = publisher_domain(landing_url)
             state, reason, diagnostics = _classify_access_block_detail(None, landing_url, self._body_text(page))
-            links = _pdf_links_from_page(page)
+            links = merge_pdf_links(_pdf_links_from_page(page), pdf_links_from_html_snapshot(page.content(), page.url))
             diagnostics = {**diagnostics, "landing_candidate": candidate}
             defer_manual_wait = bool(state in {"needs_login", "blocked_by_access"} and links)
             if defer_manual_wait:

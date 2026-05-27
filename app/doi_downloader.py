@@ -1370,6 +1370,87 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
     )
 
 
+def _decode_json_string_fragment(value: str) -> str:
+    try:
+        return str(json.loads(f'"{value}"'))
+    except Exception:
+        return value.replace("\\/", "/")
+
+
+def _append_unique_pdf_link(
+    links: list[dict[str, str]], href: str | None, text: str, source: str, base_url: str | None
+) -> None:
+    if not href:
+        return
+    absolute = urllib.parse.urljoin(base_url or "", href)
+    lowered = absolute.lower()
+    if (
+        not absolute
+        or absolute == "#"
+        or lowered.startswith("javascript:")
+        or lowered.startswith("mailto:")
+        or lowered.startswith("tel:")
+        or "contentplatform_userguide" in lowered
+        or "wp-content/uploads" in lowered
+    ):
+        return
+    if all(link.get("href") != absolute for link in links):
+        links.append({"href": absolute, "text": text, "source": source})
+
+
+def pdf_links_from_html_snapshot(html: str | None, base_url: str | None = None) -> list[dict[str, str]]:
+    if not html:
+        return []
+    links: list[dict[str, str]] = []
+    manuscript_match = re.search(r'"openManuscriptUrl"\s*:\s*"([^"]+)"', html)
+    if manuscript_match:
+        _append_unique_pdf_link(
+            links,
+            _decode_json_string_fragment(manuscript_match.group(1)),
+            "sciencedirect_open_manuscript",
+            "sciencedirect_html_state",
+            base_url,
+        )
+    pdf_index = html.find('"pdfDownload"')
+    if pdf_index >= 0:
+        section = html[pdf_index : pdf_index + 2500]
+        values = {
+            key: _decode_json_string_fragment(match.group(1))
+            for key in ("path", "pii", "pdfExtension", "md5", "pid")
+            for match in [re.search(rf'"{key}"\s*:\s*"([^"]+)"', section)]
+            if match
+        }
+        if values.get("path") and values.get("pii") and values.get("pdfExtension"):
+            pdf_url = urllib.parse.urljoin(
+                base_url or "",
+                f"/{values['path'].strip('/')}/{values['pii']}{values['pdfExtension']}",
+            )
+            query = {
+                key: value
+                for key, value in (("md5", values.get("md5")), ("pid", values.get("pid")))
+                if value
+            }
+            if query:
+                separator = "&" if urllib.parse.urlparse(pdf_url).query else "?"
+                pdf_url = pdf_url + separator + urllib.parse.urlencode(query)
+            _append_unique_pdf_link(
+                links,
+                pdf_url,
+                "sciencedirect_pdf_download",
+                "sciencedirect_html_state",
+                base_url,
+            )
+    return links
+
+
+def merge_pdf_links(*groups: list[dict[str, str]]) -> list[dict[str, str]]:
+    merged: list[dict[str, str]] = []
+    for group in groups:
+        for link in group:
+            _append_unique_pdf_link(merged, link.get("href"), link.get("text", ""), link.get("source", ""), None)
+    return merged
+
+
 class PlaywrightDownloadSession:
     def __init__(self, settings: DoiDownloadSettings):
         self.settings = settings
@@ -1427,7 +1508,7 @@ class PlaywrightDownloadSession:
             state, reason, diagnostics = _classify_access_block_detail(status_code, landing_url, self._body_text(page))
             diagnostics = {**diagnostics, "landing_candidate": candidate}
             state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
-            links = _pdf_links_from_page(page)
+            links = merge_pdf_links(_pdf_links_from_page(page), pdf_links_from_html_snapshot(page.content(), page.url))
             defer_manual_wait = bool(state in {"needs_login", "blocked_by_access"} and links)
             if defer_manual_wait:
                 diagnostics = {

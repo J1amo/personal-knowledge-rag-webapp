@@ -294,6 +294,29 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertIn("sciencedirect_pdf_download", source)
         self.assertIn("current_pdf_like_url", source)
 
+    def test_sciencedirect_html_state_yields_pdf_links(self) -> None:
+        from app.doi_downloader import pdf_links_from_html_snapshot
+
+        html = """
+        <script>
+        window.__PRELOADED_STATE__ = {"article":{
+          "openManuscriptUrl":"/science/article/am/pii/S0038110121001684",
+          "pdfDownload":{"urlMetadata":{
+            "queryParams":{"md5":"abc123","pid":"1-s2.0-S0038110122003239-main.pdf"},
+            "pii":"S0038110122003239","pdfExtension":"/pdfft","path":"science/article/pii"
+          }}
+        }};
+        </script>
+        """
+
+        links = pdf_links_from_html_snapshot(html, "https://www-sciencedirect-com.tsukuba.idm.oclc.org/science/article/pii/S003")
+
+        self.assertEqual(links[0]["href"], "https://www-sciencedirect-com.tsukuba.idm.oclc.org/science/article/am/pii/S0038110121001684")
+        self.assertEqual(
+            links[1]["href"],
+            "https://www-sciencedirect-com.tsukuba.idm.oclc.org/science/article/pii/S0038110122003239/pdfft?md5=abc123&pid=1-s2.0-S0038110122003239-main.pdf",
+        )
+
     def test_serials_solutions_candidates_keep_only_fulltext_routes(self) -> None:
         from app.doi_downloader import parse_serials_solutions_candidates, serials_solutions_lookup_url
 
