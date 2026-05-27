@@ -66,6 +66,8 @@ CAPTCHA_TERMS = (
     "security check",
     "checking your browser",
     "checking if the site connection is secure",
+    "validate.perfdrive.com",
+    "botmanager_support",
     "正在进行安全验证",
     "正在验证",
     "安全服务防护恶意自动程序",

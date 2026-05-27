@@ -111,6 +111,14 @@ class DoiDownloaderTest(unittest.TestCase):
             )[0],
             "blocked_by_captcha",
         )
+        self.assertEqual(
+            classify_access_block(
+                200,
+                "https://validate.perfdrive.com/fb803c746e9148689b3984a31fccd902/?ssk=botmanager_support@example.com",
+                "",
+            )[0],
+            "blocked_by_captcha",
+        )
         self.assertEqual(classify_access_block(200, "https://idp.test", "Shibboleth sign in MFA required")[0], "needs_login")
 
     def test_manual_access_wait_covers_institution_access_pages(self) -> None:
