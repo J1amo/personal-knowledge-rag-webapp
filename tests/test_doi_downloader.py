@@ -140,6 +140,26 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertTrue(should_wait_for_manual_access("blocked_by_captcha", enabled))
         self.assertFalse(should_wait_for_manual_access("blocked_by_access", disabled))
 
+    def test_campus_only_platform_suppresses_manual_login_wait(self) -> None:
+        from app.doi_downloader import apply_candidate_manual_wait_policy
+
+        state, reason, diagnostics = apply_candidate_manual_wait_policy(
+            "needs_login",
+            "Login, MFA, Shibboleth, or EZproxy page detected",
+            {"matched_terms": ["sign in via your institution"]},
+            {
+                "authorized_platform": {
+                    "name": "AIP Journals Complete",
+                    "campus_only": True,
+                }
+            },
+        )
+
+        self.assertEqual(state, "blocked_by_access")
+        self.assertIn("校区内限定", reason or "")
+        self.assertTrue(diagnostics["manual_wait_suppressed"])
+        self.assertEqual(diagnostics["manual_wait_suppressed_reason"], "campus_only_platform")
+
     def test_pdf_save_metadata_sidecar_existing_skip_and_hash(self) -> None:
         from app.doi_downloader import find_existing_download, save_pdf_and_metadata
 

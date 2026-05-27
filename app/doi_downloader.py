@@ -624,6 +624,33 @@ def should_wait_for_manual_access(state: str | None, settings: DoiDownloadSettin
     return bool(state in MANUAL_ACCESS_WAIT_STATUSES and settings.allow_manual_login and settings.headed)
 
 
+def apply_candidate_manual_wait_policy(
+    state: str | None,
+    reason: str | None,
+    diagnostics: dict[str, Any] | None,
+    candidate: dict[str, Any] | None,
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    diagnostics = dict(diagnostics or {})
+    candidate = candidate or {}
+    platform = candidate.get("authorized_platform") or (candidate.get("policy") or {}).get("platform")
+    if state == "needs_login" and isinstance(platform, dict) and platform.get("campus_only"):
+        diagnostics.update(
+            {
+                "classification": "blocked_by_access",
+                "manual_wait_suppressed": True,
+                "manual_wait_suppressed_reason": "campus_only_platform",
+                "authorized_platform": platform,
+            }
+        )
+        platform_name = platform.get("name") or "该平台"
+        return (
+            "blocked_by_access",
+            f"{platform_name} 在筑波清单中标记为校区内限定；当前仍出现机构登录入口，不继续等待手动登录",
+            diagnostics,
+        )
+    return state, reason, diagnostics
+
+
 def publisher_domain(url: str | None) -> str | None:
     if not url:
         return None
@@ -1357,6 +1384,7 @@ class PlaywrightDownloadSession:
                 return DownloadAttempt("downloaded", landing_url, domain, landing_url, body)
             state, reason, diagnostics = _classify_access_block_detail(status_code, landing_url, self._body_text(page))
             diagnostics = {**diagnostics, "landing_candidate": candidate}
+            state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
             if should_wait_for_manual_access(state, self.settings):
                 deadline = time.monotonic() + self.settings.manual_login_timeout_seconds
                 waited_seconds = 0.0
@@ -1372,6 +1400,7 @@ class PlaywrightDownloadSession:
                         "manual_access_wait_statuses": sorted(MANUAL_ACCESS_WAIT_STATUSES),
                         "landing_candidate": candidate,
                     }
+                    state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
                     if state not in MANUAL_ACCESS_WAIT_STATUSES:
                         break
             if state and state != "blocked_by_access":

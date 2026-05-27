@@ -30,6 +30,7 @@ from app.doi_downloader import (  # noqa: E402
     _pdf_links_from_page,
     _reason_with_evidence,
     _save_failure_artifacts,
+    apply_candidate_manual_wait_policy,
     doi_landing_candidates,
     no_authorized_landing_attempt,
     parse_doi_list,
@@ -153,7 +154,9 @@ class ChromeHandoffDownloadSession:
         reason: str | None,
         diagnostics: dict[str, Any],
         settings: Any,
+        candidate: dict[str, Any],
     ) -> tuple[str | None, str | None, dict[str, Any]]:
+        state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
         if state == "blocked_by_access" or not should_wait_for_manual_access(state, settings):
             return state, reason, diagnostics
         if self.focus_on_manual and sys.platform == "darwin":
@@ -175,6 +178,7 @@ class ChromeHandoffDownloadSession:
                 "manual_access_waited": True,
                 "manual_access_wait_seconds": round(waited_seconds, 1),
             }
+            state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
             if state is None or state == "blocked_by_access":
                 break
         return state, reason, diagnostics
@@ -224,7 +228,9 @@ class ChromeHandoffDownloadSession:
             landing_url = page.url
             domain = publisher_domain(landing_url)
             state, reason, diagnostics = _classify_access_block_detail(None, landing_url, self._body_text(page))
-            state, reason, diagnostics = self._wait_for_manual_clearance(page, state, reason, diagnostics, settings)
+            state, reason, diagnostics = self._wait_for_manual_clearance(
+                page, state, reason, diagnostics, settings, candidate
+            )
             diagnostics = {**diagnostics, "landing_candidate": candidate}
             if state:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
