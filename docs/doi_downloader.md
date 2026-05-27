@@ -10,8 +10,9 @@ It does not use an LLM for downloading. It does not bypass access controls.
 - Do not use Sci-Hub, shadow libraries, pirate mirrors, guessed token URLs, or paywall bypasses.
 - Do not download whole issues, volumes, books, keyword search result sets, or publisher collections.
 - Default concurrency is `1`.
-- Stop on login, MFA, CAPTCHA, access denied, 403, 429, institutional warning, suspicious activity, or rate-limit signals.
-- Save DOI, landing URL, publisher domain, file path, timestamp, status, and failure reason in logs.
+- Stop on login, MFA, CAPTCHA, 429, suspicious activity, or rate-limit signals.
+- Record per-article access denial or 403 as `blocked_by_access`, save evidence if possible, and continue to the next explicitly supplied DOI without bypassing access controls.
+- Save DOI, landing URL, publisher domain, file path, timestamp, status, failure reason, stop policy, and diagnostic signals in logs.
 
 ## Install Playwright
 
@@ -114,7 +115,7 @@ max 5 items
 default off
 ```
 
-Fast mode is not concurrent and still stops immediately on CAPTCHA, 403, 429, access warning, or login/MFA.
+Fast mode is not concurrent and still stops immediately on CAPTCHA, 429, suspicious activity, rate-limit, or login/MFA. Per-article access denial is logged and skipped.
 
 ## Save Layout
 
@@ -156,12 +157,13 @@ Saved fields include DOI, title, authors, journal, year, publisher, landing URL,
 
 ## Failure Handling
 
-When access or risk signals are detected, the current item is marked with a stop status and the batch stops:
+When risk signals are detected, the current item is marked with a stop status and the batch stops:
 
 - `needs_login`
-- `blocked_by_access`
 - `blocked_by_captcha`
 - `blocked_by_rate_limit`
+
+When a single article shows an access-denial or purchase-access page, the item is marked as `blocked_by_access`, diagnostics and snapshots are saved when possible, and the batch continues after the normal article delay.
 
 If possible, the app saves a screenshot and HTML snapshot under `outputs/doi_download_logs/snapshots/`.
 

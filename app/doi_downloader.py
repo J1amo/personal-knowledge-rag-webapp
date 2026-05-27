@@ -35,10 +35,10 @@ SNAPSHOT_DIR = LOG_DIR / "snapshots"
 
 STOP_BATCH_STATUSES = {
     "needs_login",
-    "blocked_by_access",
     "blocked_by_captcha",
     "blocked_by_rate_limit",
 }
+SUCCESS_STATUSES = {"downloaded", "skipped_existing"}
 
 ACCESS_TERMS = (
     "access denied",
@@ -94,6 +94,7 @@ class DownloadAttempt:
     failure_reason: str | None = None
     screenshot_path: str | None = None
     html_snapshot_path: str | None = None
+    diagnostics: dict[str, Any] | None = None
 
 
 def default_out_dir() -> Path:
@@ -203,17 +204,55 @@ def clear_browser_profile() -> dict[str, Any]:
     return {"status": "noop", "message": "DOI downloader browser profile did not exist", "profile_dir": str(PROFILE_DIR)}
 
 
-def classify_access_block(status_code: int | None, url: str | None, text: str | None) -> tuple[str | None, str | None]:
+def _classify_access_block_detail(
+    status_code: int | None, url: str | None, text: str | None
+) -> tuple[str | None, str | None, dict[str, Any]]:
     haystack = " ".join([url or "", text or ""]).lower()
-    if status_code == 429 or any(term in haystack for term in RATE_LIMIT_TERMS):
-        return "blocked_by_rate_limit", "Rate limit, 429, or suspicious activity warning detected"
-    if status_code == 403 or any(term in haystack for term in ACCESS_TERMS):
-        return "blocked_by_access", "Access denied or institutional access warning detected"
-    if any(term in haystack for term in CAPTCHA_TERMS):
-        return "blocked_by_captcha", "CAPTCHA or human verification detected"
-    if any(term in haystack for term in LOGIN_TERMS):
-        return "needs_login", "Login, MFA, Shibboleth, or EZproxy page detected"
-    return None, None
+    checks = [
+        (
+            "blocked_by_rate_limit",
+            "Rate limit, 429, or suspicious activity warning detected",
+            RATE_LIMIT_TERMS,
+            status_code == 429,
+        ),
+        (
+            "blocked_by_access",
+            "Access denied or institutional access warning detected",
+            ACCESS_TERMS,
+            status_code == 403,
+        ),
+        ("blocked_by_captcha", "CAPTCHA or human verification detected", CAPTCHA_TERMS, False),
+        ("needs_login", "Login, MFA, Shibboleth, or EZproxy page detected", LOGIN_TERMS, False),
+    ]
+    for state, reason, terms, status_match in checks:
+        matched_terms = [term for term in terms if term in haystack]
+        if status_match or matched_terms:
+            diagnostics = {
+                "http_status": status_code,
+                "url": url,
+                "matched_terms": matched_terms[:8],
+                "matched_by_http_status": bool(status_match),
+                "classification": state,
+            }
+            return state, reason, diagnostics
+    return None, None, {"http_status": status_code, "url": url, "matched_terms": []}
+
+
+def _reason_with_evidence(reason: str | None, diagnostics: dict[str, Any] | None) -> str | None:
+    if not reason:
+        return None
+    diagnostics = diagnostics or {}
+    signals = list(diagnostics.get("matched_terms") or [])
+    if diagnostics.get("matched_by_http_status") and diagnostics.get("http_status"):
+        signals.insert(0, f"HTTP {diagnostics['http_status']}")
+    if not signals:
+        return reason
+    return f"{reason} (signals: {', '.join(signals[:6])})"
+
+
+def classify_access_block(status_code: int | None, url: str | None, text: str | None) -> tuple[str | None, str | None]:
+    state, reason, _diagnostics = _classify_access_block_detail(status_code, url, text)
+    return state, reason
 
 
 def publisher_domain(url: str | None) -> str | None:
@@ -468,8 +507,9 @@ def list_doi_download_items(job_id: str | None = None, limit: int = 100) -> list
 def _write_job_log(job_id: str, summary: dict[str, Any], items: list[dict[str, Any]]) -> Path:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     path = LOG_DIR / f"{job_id}.json"
+    log_summary = {**summary, "log_path": str(path)}
     path.write_text(
-        json.dumps({"job_id": job_id, "written_at": utc_now(), "summary": summary, "items": items}, ensure_ascii=False, indent=2),
+        json.dumps({"job_id": job_id, "written_at": utc_now(), "summary": log_summary, "items": items}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     return path
@@ -573,21 +613,43 @@ class PlaywrightDownloadSession:
             if response and ("application/pdf" in content_type or landing_url.lower().endswith(".pdf")):
                 body = response.body()
                 return DownloadAttempt("downloaded", landing_url, domain, landing_url, body)
-            state, reason = classify_access_block(status_code, landing_url, self._body_text(page))
+            state, reason, diagnostics = _classify_access_block_detail(status_code, landing_url, self._body_text(page))
             if state == "needs_login" and self.settings.allow_manual_login and self.settings.headed:
                 deadline = time.monotonic() + self.settings.manual_login_timeout_seconds
                 while time.monotonic() < deadline:
                     time.sleep(2)
-                    state, reason = classify_access_block(None, page.url, self._body_text(page))
+                    state, reason, diagnostics = _classify_access_block_detail(None, page.url, self._body_text(page))
                     if state != "needs_login":
                         break
-            if state:
+            if state and state != "blocked_by_access":
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
-                return DownloadAttempt(state, page.url, publisher_domain(page.url), None, None, reason, screenshot, html)
+                return DownloadAttempt(
+                    state,
+                    page.url,
+                    publisher_domain(page.url),
+                    None,
+                    None,
+                    _reason_with_evidence(reason, diagnostics),
+                    screenshot,
+                    html,
+                    diagnostics,
+                )
 
             links = _pdf_links_from_page(page)
             if not links:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
+                if state == "blocked_by_access":
+                    return DownloadAttempt(
+                        state,
+                        page.url,
+                        publisher_domain(page.url),
+                        None,
+                        None,
+                        _reason_with_evidence(reason, diagnostics),
+                        screenshot,
+                        html,
+                        diagnostics,
+                    )
                 return DownloadAttempt("failed", page.url, domain, None, None, "No reliable PDF link found", screenshot, html)
 
             pdf_url = links[0]["href"]
@@ -596,10 +658,20 @@ class PlaywrightDownloadSession:
             pdf_status = pdf_response.status
             pdf_body = pdf_response.body()
             pdf_text = pdf_body[:3000].decode("utf-8", errors="ignore")
-            state, reason = classify_access_block(pdf_status, pdf_url, pdf_text)
+            state, reason, diagnostics = _classify_access_block_detail(pdf_status, pdf_url, pdf_text)
             if state:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
-                return DownloadAttempt(state, page.url, domain, pdf_url, None, reason, screenshot, html)
+                return DownloadAttempt(
+                    state,
+                    page.url,
+                    domain,
+                    pdf_url,
+                    None,
+                    _reason_with_evidence(reason, diagnostics),
+                    screenshot,
+                    html,
+                    diagnostics,
+                )
             content_type = (pdf_response.headers.get("content-type", "") or "").lower()
             if "application/pdf" not in content_type and not pdf_body.startswith(b"%PDF"):
                 return DownloadAttempt("failed", page.url, domain, pdf_url, None, "PDF link did not return a PDF")
@@ -658,7 +730,20 @@ def run_doi_download_job(
     stop_reason = None
 
     if not selected:
-        summary = {"status_counts": {"failed": 0}, "message": "No valid DOI supplied"}
+        summary = {
+            "status_counts": {"failed": 0},
+            "message": "No valid DOI supplied",
+            "input_count": len(all_dois),
+            "requested_count": 0,
+            "processed_count": 0,
+            "unprocessed_count": 0,
+            "stopped_reason": "No valid DOI supplied",
+            "log_dir": str(LOG_DIR),
+            "profile_dir": str(PROFILE_DIR),
+            "settings": asdict(resolved),
+        }
+        log_path = _write_job_log(job_id, summary, [])
+        summary["log_path"] = str(log_path)
         _finish_job(job_id, "failed", summary, "No valid DOI supplied")
         return {"status": "failed", "job_id": job_id, "summary": summary, "items": []}
 
@@ -760,6 +845,7 @@ def run_doi_download_job(
                         "failure_reason": attempt.failure_reason,
                         "screenshot_path": attempt.screenshot_path,
                         "html_snapshot_path": attempt.html_snapshot_path,
+                        "diagnostics": attempt.diagnostics,
                     }
                 )
                 if attempt.status in STOP_BATCH_STATUSES:
@@ -774,8 +860,10 @@ def run_doi_download_job(
         counts[item["status"]] = counts.get(item["status"], 0) + 1
     if stop_reason:
         job_status = "stopped"
+    elif counts and all(status in SUCCESS_STATUSES for status in counts):
+        job_status = "ready"
     elif counts.get("downloaded") or counts.get("skipped_existing"):
-        job_status = "ready" if not counts.get("failed") else "partial"
+        job_status = "partial"
     else:
         job_status = "failed"
     summary = {
@@ -783,7 +871,10 @@ def run_doi_download_job(
         "input_count": len(all_dois),
         "requested_count": len(selected),
         "processed_count": len(items),
+        "unprocessed_count": max(0, len(selected) - len(items)),
         "stopped_reason": stop_reason,
+        "stop_batch_statuses": sorted(STOP_BATCH_STATUSES),
+        "continue_item_statuses": ["blocked_by_access"],
         "log_dir": str(LOG_DIR),
         "profile_dir": str(PROFILE_DIR),
         "settings": asdict(resolved),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -128,6 +129,22 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["status"], "failed")
         self.assertIn("Playwright", result["items"][0]["failure_reason"])
 
+    def test_invalid_input_still_writes_job_log(self) -> None:
+        from app.doi_downloader import run_doi_download_job
+
+        result = run_doi_download_job(
+            "not a doi",
+            {"out_dir": str(self.root / "papers"), "max_items": 1},
+            metadata_fetcher=lambda doi: {"doi": doi, "title": "Should Not Run"},
+            sleeper=lambda _seconds: None,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["summary"]["message"], "No valid DOI supplied")
+        self.assertTrue(Path(result["summary"]["log_path"]).exists())
+        log_payload = json.loads(Path(result["summary"]["log_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(log_payload["summary"]["log_path"], result["summary"]["log_path"])
+
     def test_mock_download_auto_ingest_and_stop_condition(self) -> None:
         from app.db import connect
         from app.doi_downloader import DownloadAttempt, run_doi_download_job
@@ -173,6 +190,50 @@ class DoiDownloaderTest(unittest.TestCase):
             self.assertEqual(con.execute("SELECT COUNT(*) AS n FROM doi_download_jobs").fetchone()["n"], 1)
             self.assertEqual(con.execute("SELECT COUNT(*) AS n FROM doi_download_items").fetchone()["n"], 2)
             self.assertEqual(con.execute("SELECT COUNT(*) AS n FROM sources").fetchone()["n"], 1)
+
+    def test_access_denied_item_continues_with_diagnostics(self) -> None:
+        from app.doi_downloader import DownloadAttempt, run_doi_download_job
+
+        pdf_path = self.root / "mock.pdf"
+        make_pdf(pdf_path, "Mock DOI PDF")
+
+        def fake_runner(doi, _settings, _metadata, _artifacts_dir):
+            if doi.endswith("blocked"):
+                return DownloadAttempt(
+                    status="blocked_by_access",
+                    landing_url="https://publisher.test/blocked",
+                    publisher_domain="publisher.test",
+                    failure_reason="Access denied or institutional access warning detected (signals: purchase access)",
+                    diagnostics={"classification": "blocked_by_access", "matched_terms": ["purchase access"]},
+                )
+            return DownloadAttempt(
+                status="downloaded",
+                landing_url="https://publisher.test/article",
+                publisher_domain="publisher.test",
+                pdf_url="https://publisher.test/article.pdf",
+                pdf_bytes=pdf_path.read_bytes(),
+            )
+
+        result = run_doi_download_job(
+            "10.1234/blocked\n10.1234/downloaded",
+            {"out_dir": str(self.root / "papers"), "max_items": 2},
+            browser_runner=fake_runner,
+            metadata_fetcher=lambda doi: {
+                "doi": doi,
+                "title": "Mock DOI PDF",
+                "authors": ["Grace Hopper"],
+                "year": 2026,
+                "publisher": "publisher.test",
+            },
+            sleeper=lambda _seconds: None,
+        )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["items"][0]["status"], "blocked_by_access")
+        self.assertEqual(result["items"][0]["diagnostics"]["matched_terms"], ["purchase access"])
+        self.assertEqual(result["items"][1]["status"], "downloaded")
+        self.assertEqual(result["summary"]["processed_count"], 2)
+        self.assertEqual(result["summary"]["unprocessed_count"], 0)
 
 
 if __name__ == "__main__":
