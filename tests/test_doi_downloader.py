@@ -91,6 +91,14 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(classify_access_block(403, "https://publisher.test/article", "")[0], "blocked_by_access")
         self.assertEqual(classify_access_block(429, "https://publisher.test/article", "")[0], "blocked_by_rate_limit")
         self.assertEqual(classify_access_block(200, "https://publisher.test", "Please complete CAPTCHA")[0], "blocked_by_captcha")
+        self.assertEqual(
+            classify_access_block(
+                200,
+                "https://pubs.acs.org/article",
+                "pubs.acs.org 正在进行安全验证 正在验证 由 Cloudflare 提供的性能和安全服务",
+            )[0],
+            "blocked_by_captcha",
+        )
         self.assertEqual(classify_access_block(200, "https://idp.test", "Shibboleth sign in MFA required")[0], "needs_login")
 
     def test_manual_access_wait_covers_institution_access_pages(self) -> None:

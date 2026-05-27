@@ -164,7 +164,7 @@ Saved fields include DOI, title, authors, journal, year, publisher, landing URL,
 When risk signals are detected, the current item is marked with a stop status and the batch stops:
 
 - `needs_login`
-- `blocked_by_captcha`
+- `blocked_by_captcha`，包括验证码、人机验证、Cloudflare/出版社安全验证页
 - `blocked_by_rate_limit`
 
 When a single article shows an access-denial or purchase-access page, headed mode plus manual login waiting gives the user time to complete authorized school library, institutional, or publisher-account access. If the page is still inaccessible after that wait, the item is marked as `blocked_by_access`, diagnostics and snapshots are saved when possible, and the batch continues after the normal article delay.

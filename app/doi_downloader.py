@@ -51,7 +51,23 @@ ACCESS_TERMS = (
     "license required",
     "purchase access",
 )
-CAPTCHA_TERMS = ("captcha", "recaptcha", "hcaptcha", "verify you are human")
+CAPTCHA_TERMS = (
+    "captcha",
+    "recaptcha",
+    "hcaptcha",
+    "verify you are human",
+    "are you a robot",
+    "cloudflare",
+    "ray id",
+    "security verification",
+    "security check",
+    "checking your browser",
+    "checking if the site connection is secure",
+    "正在进行安全验证",
+    "正在验证",
+    "安全服务防护恶意自动程序",
+    "验证您不是自动程序",
+)
 RATE_LIMIT_TERMS = ("too many requests", "rate limit", "suspicious activity", "unusual traffic")
 LOGIN_TERMS = (
     "log in",
@@ -223,7 +239,7 @@ def _classify_access_block_detail(
             ACCESS_TERMS,
             status_code == 403,
         ),
-        ("blocked_by_captcha", "CAPTCHA or human verification detected", CAPTCHA_TERMS, False),
+        ("blocked_by_captcha", "CAPTCHA, bot check, or security verification detected", CAPTCHA_TERMS, False),
         ("needs_login", "Login, MFA, Shibboleth, or EZproxy page detected", LOGIN_TERMS, False),
     ]
     for state, reason, terms, status_match in checks:

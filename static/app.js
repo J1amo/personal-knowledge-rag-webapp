@@ -94,7 +94,7 @@ const statusLabel = {
   skipped_existing: "已存在",
   blocked_by_rate_limit: "限流阻止",
   blocked_by_access: "访问受限",
-  blocked_by_captcha: "需要验证码",
+  blocked_by_captcha: "验证码/安全验证",
   needs_login: "需要登录",
   imported: "已导入",
   parsed: "已解析",
