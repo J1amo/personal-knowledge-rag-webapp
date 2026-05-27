@@ -215,12 +215,24 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(result["status"], "stopped")
         self.assertEqual(result["items"][0]["status"], "downloaded")
         self.assertEqual(result["items"][1]["status"], "blocked_by_rate_limit")
-        self.assertEqual(len(result["items"]), 2)
+        self.assertEqual(result["items"][2]["status"], "pending")
+        self.assertEqual(result["items"][2]["doi"], "10.1234/not-processed")
+        self.assertIn("Not processed because the job stopped", result["items"][2]["failure_reason"])
+        self.assertEqual(len(result["items"]), 3)
+        self.assertEqual(result["summary"]["processed_count"], 2)
+        self.assertEqual(result["summary"]["unprocessed_count"], 1)
+        self.assertEqual(result["summary"]["completed_batches"], 1)
+        self.assertEqual(result["summary"]["status_counts"]["pending"], 1)
         self.assertTrue(result["items"][0]["ingestion_source_id"].startswith("src_"))
         with connect() as con:
             self.assertEqual(con.execute("SELECT COUNT(*) AS n FROM doi_download_jobs").fetchone()["n"], 1)
-            self.assertEqual(con.execute("SELECT COUNT(*) AS n FROM doi_download_items").fetchone()["n"], 2)
+            self.assertEqual(con.execute("SELECT COUNT(*) AS n FROM doi_download_items").fetchone()["n"], 3)
             self.assertEqual(con.execute("SELECT COUNT(*) AS n FROM sources").fetchone()["n"], 1)
+
+    def test_pdf_link_extractor_ignores_javascript_void_links(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "app" / "doi_downloader.py").read_text(encoding="utf-8")
+        self.assertIn("lowerHref.startsWith('javascript:')", source)
+        self.assertIn("lowerHref.startsWith('mailto:')", source)
 
     def test_access_denied_item_continues_with_diagnostics(self) -> None:
         from app.doi_downloader import DownloadAttempt, run_doi_download_job

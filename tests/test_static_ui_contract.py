@@ -47,6 +47,17 @@ class StaticUiContractTest(unittest.TestCase):
         self.assertEqual(len(re.findall(r'class="nav-item mode-tab[^"]*" data-page="doi"', html)), 3)
         self.assertIn('const collectIntakePages = new Set(["upload", "literature", "doi"]);', app_js)
 
+    def test_doi_page_summarizes_failed_links(self) -> None:
+        html = (self.root / "static" / "index.html").read_text(encoding="utf-8")
+        css = (self.root / "static" / "styles.css").read_text(encoding="utf-8")
+        app_js = (self.root / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="doiFailedLinks"', html)
+        self.assertIn("未下载成功 DOI 链接", app_js)
+        self.assertIn('const doiSuccessStatuses = new Set(["downloaded", "skipped_existing"]);', app_js)
+        self.assertIn("function renderDoiFailedLinks(downloads)", app_js)
+        self.assertIn(".doi-failed-links {", css)
+        self.assertIn(".copy-box {", css)
+
     def test_runtime_boundary_is_not_a_highlighted_choice(self) -> None:
         html = (self.root / "static" / "index.html").read_text(encoding="utf-8")
         css = (self.root / "static" / "styles.css").read_text(encoding="utf-8")

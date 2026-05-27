@@ -97,6 +97,7 @@ const statusLabel = {
   blocked_by_captcha: "验证码/安全验证",
   needs_login: "需要登录",
   manual_wait: "等待手动操作",
+  resolving: "解析中",
   imported: "已导入",
   parsed: "已解析",
   chunked: "已切块",
@@ -116,6 +117,7 @@ const retrievalModeLabel = {
 };
 
 const collectIntakePages = new Set(["upload", "literature", "doi"]);
+const doiSuccessStatuses = new Set(["downloaded", "skipped_existing"]);
 
 function labelFrom(labels, value) {
   return labels[value] || value || "";
@@ -255,6 +257,57 @@ function table(rows, columns) {
           .join("")}</tr>`,
     )
     .join("")}</tbody></table>`;
+}
+
+function doiUrl(doi) {
+  return `https://doi.org/${doi}`;
+}
+
+function renderDoiFailedLinks(downloads) {
+  const jobs = downloads.jobs || [];
+  const items = downloads.items || [];
+  const latestJob = jobs[0];
+  if (!latestJob) {
+    return '<h3>未下载成功 DOI 链接</h3><div class="muted">暂无 DOI 下载任务。</div>';
+  }
+
+  const latestJobId = latestJob.job_id;
+  const scopedItems = items.filter((item) => item.job_id === latestJobId);
+  const failedItems = [];
+  const seen = new Set();
+  scopedItems.forEach((item) => {
+    if (!item.doi || doiSuccessStatuses.has(item.status)) return;
+    if (seen.has(item.doi)) return;
+    seen.add(item.doi);
+    failedItems.push(item);
+  });
+
+  const pendingCount = scopedItems.filter((item) => item.status === "pending").length;
+  const unprocessedCount = Number(latestJob.summary?.unprocessed_count || 0);
+  const legacyMissingCount = Math.max(0, unprocessedCount - pendingCount);
+  if (!failedItems.length) {
+    return `<h3>未下载成功 DOI 链接</h3>
+      <div class="policy-box">最新任务没有未下载成功的 DOI。</div>`;
+  }
+
+  const links = failedItems.map((item) => doiUrl(item.doi));
+  const legacyNote = legacyMissingCount
+    ? `<div class="policy-box warn">这条历史任务还有 ${esc(legacyMissingCount)} 篇未处理 DOI，但旧日志没有保存它们的明细；新任务会完整记录 pending DOI。</div>`
+    : "";
+  return `<div class="doi-failed-links">
+    <div class="doi-failed-head">
+      <h3>未下载成功 DOI 链接</h3>
+      <span class="pill warn">${esc(failedItems.length)} 篇</span>
+    </div>
+    <div class="muted">范围：最新任务 <code>${esc(latestJobId)}</code>。已下载和已存在的 DOI 不列入。</div>
+    <textarea class="copy-box" readonly rows="${Math.min(Math.max(links.length, 4), 12)}">${esc(links.join("\n"))}</textarea>
+    ${legacyNote}
+    ${table(failedItems, [
+      { label: "DOI 链接", render: (row) => `<a href="${esc(doiUrl(row.doi))}" target="_blank" rel="noreferrer">${esc(doiUrl(row.doi))}</a>` },
+      { label: "状态", render: (row) => esc(labelFrom(statusLabel, row.status)) },
+      { label: "原因", key: "failure_reason" },
+    ])}
+  </div>`;
 }
 
 function updateWorkflowContext(page) {
@@ -584,6 +637,7 @@ function switchResearchPanel(panel) {
 async function loadDoiDownloads() {
   const [status, downloads] = await Promise.all([api("/api/doi-downloader/status"), api("/api/doi-downloads")]);
   jsonBox(document.getElementById("doiStatus"), status);
+  document.getElementById("doiFailedLinks").innerHTML = renderDoiFailedLinks(downloads);
   document.getElementById("doiJobsTable").innerHTML = `<h3>任务</h3>${table(downloads.jobs || [], [
     { label: "job_id", render: (row) => `<code>${esc(row.job_id)}</code>` },
     { label: "状态", render: (row) => esc(labelFrom(statusLabel, row.status)) },

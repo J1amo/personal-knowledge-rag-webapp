@@ -583,7 +583,11 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
           document.querySelectorAll('meta').forEach((meta) => {
             const name = (meta.getAttribute('name') || meta.getAttribute('property') || '').toLowerCase();
             const content = meta.getAttribute('content') || '';
-            if (content && name.includes('citation_pdf_url')) {
+            const lowerContent = content.toLowerCase();
+            if (content && name.includes('citation_pdf_url') &&
+                !lowerContent.startsWith('javascript:') &&
+                !lowerContent.startsWith('mailto:') &&
+                !lowerContent.startsWith('tel:')) {
               links.push({ href: content, text: 'citation_pdf_url', source: 'meta' });
             }
           });
@@ -592,6 +596,12 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
             const text = (a.textContent || a.getAttribute('aria-label') || '').trim();
             const lowerHref = href.toLowerCase();
             const lowerText = text.toLowerCase();
+            if (!href || href === '#' ||
+                lowerHref.startsWith('javascript:') ||
+                lowerHref.startsWith('mailto:') ||
+                lowerHref.startsWith('tel:')) {
+              return;
+            }
             if (lowerHref.endsWith('.pdf') || lowerHref.includes('/pdf') ||
                 lowerText === 'pdf' || lowerText.includes('download pdf') ||
                 lowerText.includes('article pdf') || lowerText.includes('view pdf')) {
@@ -947,6 +957,28 @@ def run_doi_download_job(
             if idx < len(all_dois) and not stop_reason:
                 _sleep_article(resolved, sleeper)
 
+    processed_count = len(items)
+    for idx in range(processed_count + 1, len(all_dois) + 1):
+        doi = all_dois[idx - 1]
+        batch_index = (idx - 1) // batch_size + 1
+        batch_item_index = (idx - 1) % batch_size + 1
+        item_id = _create_item(job_id, doi)
+        _update_item(
+            item_id,
+            status="pending",
+            failure_reason=f"Not processed because the job stopped: {stop_reason}",
+        )
+        items.append(
+            {
+                "id": item_id,
+                "doi": doi,
+                "status": "pending",
+                "failure_reason": f"Not processed because the job stopped: {stop_reason}",
+                "batch_index": batch_index,
+                "batch_item_index": batch_item_index,
+            }
+        )
+
     counts: dict[str, int] = {}
     for item in items:
         counts[item["status"]] = counts.get(item["status"], 0) + 1
@@ -962,11 +994,11 @@ def run_doi_download_job(
         "status_counts": counts,
         "input_count": len(all_dois),
         "requested_count": len(all_dois),
-        "processed_count": len(items),
-        "unprocessed_count": max(0, len(all_dois) - len(items)),
+        "processed_count": processed_count,
+        "unprocessed_count": max(0, len(all_dois) - processed_count),
         "batch_size": batch_size,
         "batch_count": total_batches,
-        "completed_batches": _batch_count(len(items), batch_size),
+        "completed_batches": _batch_count(processed_count, batch_size),
         "stopped_reason": stop_reason,
         "stop_batch_statuses": sorted(STOP_BATCH_STATUSES),
         "continue_item_statuses": ["blocked_by_access"],
