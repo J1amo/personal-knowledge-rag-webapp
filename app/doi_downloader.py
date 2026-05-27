@@ -971,6 +971,45 @@ def no_authorized_landing_attempt(doi: str, metadata: dict[str, Any] | None = No
     )
 
 
+def tsukuba_proxy_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.netloc.lower().split("@")[-1].split(":")[0]
+    if not host or host.endswith(".tsukuba.idm.oclc.org") or host == "tsukuba.idm.oclc.org":
+        return None
+    if host not in {"www.sciencedirect.com", "sciencedirect.com", "linkinghub.elsevier.com"}:
+        return None
+    proxy_host = host.replace(".", "-") + ".tsukuba.idm.oclc.org"
+    return urllib.parse.urlunparse((parsed.scheme or "https", proxy_host, parsed.path, parsed.params, parsed.query, parsed.fragment))
+
+
+def _expand_tsukuba_proxy_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        proxy_href = tsukuba_proxy_url(str(candidate.get("href") or ""))
+        platform = candidate.get("authorized_platform") or {}
+        should_proxy = platform.get("name") in {"Elsevier ScienceDirect Journals", "ScienceDirect Freedom Collection"}
+        if proxy_href and should_proxy:
+            proxied = {
+                **candidate,
+                "href": proxy_href,
+                "source": f"{candidate.get('source') or 'candidate'}_tsukuba_proxy",
+                "publisher_domain": publisher_domain(proxy_href),
+                "priority": int(candidate.get("priority") or 50) - 1,
+                "proxied_from": candidate.get("href"),
+            }
+            if proxy_href not in seen:
+                expanded.append(proxied)
+                seen.add(proxy_href)
+        href = str(candidate.get("href") or "")
+        if href and href not in seen:
+            expanded.append(candidate)
+            seen.add(href)
+    return expanded
+
+
 def doi_landing_candidates(
     doi: str, metadata: dict[str, Any] | None = None, *, include_direct: bool = True
 ) -> list[dict[str, Any]]:
@@ -996,7 +1035,7 @@ def doi_landing_candidates(
             direct = None
         if direct and all(candidate.get("href") != direct["href"] for candidate in candidates):
             candidates.append(direct)
-    return candidates
+    return _expand_tsukuba_proxy_candidates(candidates)
 
 
 def fetch_crossref_metadata(doi: str, timeout: int = 8) -> dict[str, Any]:

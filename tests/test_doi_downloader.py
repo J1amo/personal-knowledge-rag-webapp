@@ -438,6 +438,30 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertTrue(candidates[0]["policy"]["open_access"])
         self.assertEqual([item["source"] for item in candidates], ["hal_api"])
 
+    def test_doi_landing_candidates_prefer_tsukuba_sciencedirect_proxy(self) -> None:
+        from app.doi_downloader import doi_landing_candidates, tsukuba_proxy_url
+
+        self.assertEqual(
+            tsukuba_proxy_url("https://www.sciencedirect.com/science/article/abs/pii/S0038110116303094?via%3Dihub"),
+            "https://www-sciencedirect-com.tsukuba.idm.oclc.org/science/article/abs/pii/S0038110116303094?via%3Dihub",
+        )
+        with patch(
+            "app.doi_downloader.fetch_serials_solutions_candidates",
+            return_value=[
+                {
+                    "href": "https://www.sciencedirect.com/science/article/abs/pii/S0038110116303094?via%3Dihub",
+                    "text": "Full text",
+                    "source": "serials_solutions",
+                    "priority": 10,
+                    "publisher_domain": "www.sciencedirect.com",
+                }
+            ],
+        ):
+            candidates = doi_landing_candidates("10.1016/j.sse.2016.12.008", {"publisher": "Elsevier"})
+
+        self.assertEqual(candidates[0]["publisher_domain"], "www-sciencedirect-com.tsukuba.idm.oclc.org")
+        self.assertEqual(candidates[0]["proxied_from"], candidates[1]["href"])
+
     def test_access_denied_item_continues_with_diagnostics(self) -> None:
         from app.doi_downloader import DownloadAttempt, run_doi_download_job
 
