@@ -86,6 +86,9 @@ LOGIN_TERMS = (
     "sign in via your institution",
     "single sign-on",
     "shibboleth",
+    "saml2/redirect/sso",
+    "/idp/profile/saml2/",
+    "idp.account.",
     "ezproxy",
     "mfa",
     "multi-factor",
@@ -400,6 +403,8 @@ def find_existing_download(doi: str, out_dir: Path) -> dict[str, Any] | None:
             continue
         except ValueError:
             continue
+        if payload.get("status") and payload.get("status") != "downloaded":
+            continue
         if sidecar_doi == doi:
             path = Path(payload.get("file_path") or sidecar.with_suffix(".pdf"))
             if path.exists():
@@ -582,6 +587,13 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
         """
         () => {
           const links = [];
+          const blockedPdfTerms = [
+            'contentplatform_userguide',
+            'userguide',
+            'user-guide',
+            'wp-content/uploads',
+            'manual.pdf',
+          ];
           document.querySelectorAll('meta').forEach((meta) => {
             const name = (meta.getAttribute('name') || meta.getAttribute('property') || '').toLowerCase();
             const content = meta.getAttribute('content') || '';
@@ -589,7 +601,8 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
             if (content && name.includes('citation_pdf_url') &&
                 !lowerContent.startsWith('javascript:') &&
                 !lowerContent.startsWith('mailto:') &&
-                !lowerContent.startsWith('tel:')) {
+                !lowerContent.startsWith('tel:') &&
+                !blockedPdfTerms.some((term) => lowerContent.includes(term))) {
               links.push({ href: content, text: 'citation_pdf_url', source: 'meta' });
             }
           });
@@ -601,7 +614,8 @@ def _pdf_links_from_page(page: Any) -> list[dict[str, str]]:
             if (!href || href === '#' ||
                 lowerHref.startsWith('javascript:') ||
                 lowerHref.startsWith('mailto:') ||
-                lowerHref.startsWith('tel:')) {
+                lowerHref.startsWith('tel:') ||
+                blockedPdfTerms.some((term) => lowerHref.includes(term))) {
               return;
             }
             if (lowerHref.endsWith('.pdf') || lowerHref.includes('/pdf') ||

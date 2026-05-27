@@ -119,6 +119,14 @@ class DoiDownloaderTest(unittest.TestCase):
             )[0],
             "blocked_by_captcha",
         )
+        self.assertEqual(
+            classify_access_block(
+                200,
+                "https://idp.account.tsukuba.ac.jp/idp/profile/SAML2/Redirect/SSO?execution=e1s2",
+                "",
+            )[0],
+            "needs_login",
+        )
         self.assertEqual(classify_access_block(200, "https://idp.test", "Shibboleth sign in MFA required")[0], "needs_login")
 
     def test_manual_access_wait_covers_institution_access_pages(self) -> None:
@@ -153,6 +161,11 @@ class DoiDownloaderTest(unittest.TestCase):
         existing = find_existing_download("10.1234/test", out_dir)
         self.assertIsNotNone(existing)
         self.assertEqual(existing["saved_path"], saved["saved_path"])
+        sidecar = Path(saved["metadata_path"])
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        payload["status"] = "rejected_non_article_pdf"
+        sidecar.write_text(json.dumps(payload), encoding="utf-8")
+        self.assertIsNone(find_existing_download("10.1234/test", out_dir))
 
     def test_job_records_playwright_missing_without_network(self) -> None:
         from app.doi_downloader import run_doi_download_job
@@ -243,6 +256,8 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertIn("lowerHref.startsWith('mailto:')", source)
         self.assertIn("ieeexplore\\\\.ieee\\\\.org\\\\/document", source)
         self.assertIn("stamp/stamp.jsp?tp=&arnumber=", source)
+        self.assertIn("contentplatform_userguide", source)
+        self.assertIn("wp-content/uploads", source)
 
     def test_access_denied_item_continues_with_diagnostics(self) -> None:
         from app.doi_downloader import DownloadAttempt, run_doi_download_job
