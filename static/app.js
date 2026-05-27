@@ -872,6 +872,7 @@ async function init() {
       doi_text: form.doi_text.value,
       out_dir: form.out_dir.value,
       max_items: Number(form.max_items.value || 10),
+      manual_login_timeout_seconds: Number(form.manual_login_timeout_seconds.value || 900),
       headed: Boolean(form.headed.checked),
       allow_manual_login: Boolean(form.allow_manual_login.checked),
       fast_mode: Boolean(form.fast_mode.checked),

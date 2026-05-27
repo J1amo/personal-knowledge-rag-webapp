@@ -422,6 +422,8 @@ class Handler(BaseHTTPRequestHandler):
                             "max_items": int(payload.get("max_items") or 10),
                             "headed": bool(payload.get("headed")),
                             "allow_manual_login": bool(payload.get("allow_manual_login")),
+                            "manual_login_timeout_seconds": int(payload.get("manual_login_timeout_seconds") or 0)
+                            or None,
                             "fast_mode": bool(payload.get("fast_mode")),
                             "auto_ingest": bool(payload.get("auto_ingest")),
                             "rebuild_after_ingest": bool(payload.get("rebuild_after_ingest")),

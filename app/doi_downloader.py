@@ -29,6 +29,8 @@ FAST_ARTICLE_DELAY_MAX = 10.0
 DEFAULT_MAX_ITEMS = 10
 ABSOLUTE_MAX_ITEMS = 20
 FAST_MAX_ITEMS = 5
+DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS = 900
+MAX_MANUAL_LOGIN_TIMEOUT_SECONDS = 3600
 PROFILE_DIR = config.CACHE_DIR / "browser_profiles" / "doi_downloader"
 LOG_DIR = config.OUTPUT_DIR / "doi_download_logs"
 SNAPSHOT_DIR = LOG_DIR / "snapshots"
@@ -38,7 +40,7 @@ STOP_BATCH_STATUSES = {
     "blocked_by_captcha",
     "blocked_by_rate_limit",
 }
-MANUAL_ACCESS_WAIT_STATUSES = {"needs_login", "blocked_by_access"}
+MANUAL_ACCESS_WAIT_STATUSES = {"needs_login", "blocked_by_access", "blocked_by_captcha"}
 SUCCESS_STATUSES = {"downloaded", "skipped_existing"}
 
 ACCESS_TERMS = (
@@ -97,7 +99,7 @@ class DoiDownloadSettings:
     page_action_wait_max: float = DEFAULT_PAGE_WAIT_MAX
     article_delay_min: float = DEFAULT_ARTICLE_DELAY_MIN
     article_delay_max: float = DEFAULT_ARTICLE_DELAY_MAX
-    manual_login_timeout_seconds: int = 180
+    manual_login_timeout_seconds: int = DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS
     retry_limit: int = 1
 
 
@@ -174,6 +176,9 @@ def resolve_settings(payload: dict[str, Any] | DoiDownloadSettings | None = None
             max_items=int(payload.get("max_items") or DEFAULT_MAX_ITEMS),
             auto_ingest=bool(payload.get("auto_ingest")),
             rebuild_after_ingest=bool(payload.get("rebuild_after_ingest")),
+            manual_login_timeout_seconds=int(
+                payload.get("manual_login_timeout_seconds") or DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS
+            ),
         )
     if settings.fast_mode:
         settings.max_items = max(1, min(settings.max_items, FAST_MAX_ITEMS))
@@ -187,6 +192,9 @@ def resolve_settings(payload: dict[str, Any] | DoiDownloadSettings | None = None
         settings.page_action_wait_min = DEFAULT_PAGE_WAIT_MIN
     if settings.page_action_wait_max < settings.page_action_wait_min:
         settings.page_action_wait_max = max(settings.page_action_wait_min, DEFAULT_PAGE_WAIT_MAX)
+    settings.manual_login_timeout_seconds = max(
+        30, min(int(settings.manual_login_timeout_seconds), MAX_MANUAL_LOGIN_TIMEOUT_SECONDS)
+    )
     return settings
 
 
@@ -208,6 +216,9 @@ def doi_downloader_status() -> dict[str, Any]:
             "fast_mode_default": False,
             "fast_mode_article_delay_seconds": [FAST_ARTICLE_DELAY_MIN, FAST_ARTICLE_DELAY_MAX],
             "fast_mode_max_batch_size": FAST_MAX_ITEMS,
+            "manual_access_wait_statuses": sorted(MANUAL_ACCESS_WAIT_STATUSES),
+            "manual_login_timeout_seconds": DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS,
+            "max_manual_login_timeout_seconds": MAX_MANUAL_LOGIN_TIMEOUT_SECONDS,
         },
         "setup_hint": (
             "Install with: python -m pip install playwright && python -m playwright install chromium"

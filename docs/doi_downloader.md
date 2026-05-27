@@ -10,8 +10,8 @@ It does not use an LLM for downloading. It does not bypass access controls.
 - Do not use Sci-Hub, shadow libraries, pirate mirrors, guessed token URLs, or paywall bypasses.
 - Do not download whole issues, volumes, books, keyword search result sets, or publisher collections.
 - Default concurrency is `1`.
-- Stop on login, MFA, CAPTCHA, 429, suspicious activity, or rate-limit signals.
-- When headed mode and manual login waiting are enabled, pause on login pages and institution/access pages so the user can complete their authorized library or publisher login.
+- Stop on login, MFA, CAPTCHA, 429, suspicious activity, or rate-limit signals after the allowed manual wait window.
+- When headed mode and manual login waiting are enabled, pause on login pages, institution/access pages, CAPTCHA pages, and publisher security verification pages so the user can complete their authorized library, publisher login, or human verification.
 - If manual login waiting is not enabled, or if the article is still inaccessible after the wait, record per-article access denial or 403 as `blocked_by_access`, save evidence if possible, and continue to the next explicitly supplied DOI without bypassing access controls.
 - Save DOI, landing URL, publisher domain, file path, timestamp, status, failure reason, stop policy, and diagnostic signals in logs.
 
@@ -58,8 +58,10 @@ DOI list:
 Manual institutional login:
 
 ```bash
-./scripts/download_by_doi.py --doi-file dois.txt --out data/raw/papers --headed --allow-manual-login
+./scripts/download_by_doi.py --doi-file dois.txt --out data/raw/papers --headed --allow-manual-login --manual-login-timeout-seconds 900
 ```
+
+With headed browser mode plus manual waiting enabled, login pages, institutional access pages, CAPTCHA pages, and publisher security verification pages keep the browser open so the user can complete authorized access manually.
 
 Fast mode, only for small open-access or explicitly confirmed batches:
 
@@ -87,7 +89,7 @@ Use the `DOI 下载器` page to:
 - choose a save directory;
 - set the per-batch DOI limit while still processing the full list;
 - run with or without visible browser mode;
-- allow manual login waiting;
+- allow manual login/security verification waiting and set the wait window;
 - enable fast mode;
 - optionally add downloaded PDFs to the document library;
 - view job and item logs;
@@ -119,7 +121,7 @@ max 5 items per batch
 default off
 ```
 
-Fast mode is not concurrent and still stops immediately on CAPTCHA, 429, suspicious activity, or rate-limit. Login/MFA and institution access pages pause only when headed mode and manual login waiting are enabled.
+Fast mode is not concurrent and still stops on unresolved CAPTCHA, 429, suspicious activity, or rate-limit. Login/MFA, CAPTCHA, publisher security verification, and institution access pages pause only when headed mode and manual login waiting are enabled.
 
 ## Save Layout
 
@@ -167,7 +169,7 @@ When risk signals are detected, the current item is marked with a stop status an
 - `blocked_by_captcha`，包括验证码、人机验证、Cloudflare/出版社安全验证页
 - `blocked_by_rate_limit`
 
-When a single article shows an access-denial or purchase-access page, headed mode plus manual login waiting gives the user time to complete authorized school library, institutional, or publisher-account access. If the page is still inaccessible after that wait, the item is marked as `blocked_by_access`, diagnostics and snapshots are saved when possible, and the batch continues after the normal article delay.
+When a single article shows an access-denial, purchase-access, login, CAPTCHA, or security verification page, headed mode plus manual login waiting gives the user time to complete authorized school library, institutional, publisher-account, or human-verification access. If the page is still blocked after that wait, the item is marked with the corresponding status, diagnostics and snapshots are saved when possible, and the batch either continues for `blocked_by_access` or stops for login/CAPTCHA/rate-limit boundaries.
 
 If possible, the app saves a screenshot and HTML snapshot under `outputs/doi_download_logs/snapshots/`.
 

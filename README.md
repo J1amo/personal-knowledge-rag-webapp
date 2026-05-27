@@ -199,8 +199,10 @@ python3 -m playwright install chromium
 需要机构登录时：
 
 ```bash
-./scripts/download_by_doi.py --doi-file dois.txt --headed --allow-manual-login
+./scripts/download_by_doi.py --doi-file dois.txt --headed --allow-manual-login --manual-login-timeout-seconds 900
 ```
+
+勾选/传入手动等待后，登录页、机构访问页、验证码和出版社安全验证页会保持可见浏览器，等待用户完成合法授权访问；未解决的验证码、429 或可疑流量仍会停止批次。
 
 默认不自动 ingestion；如需下载后加入文档库：
 

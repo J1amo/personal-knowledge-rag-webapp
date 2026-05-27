@@ -336,7 +336,7 @@
           </div>
           <section class="panel">
             <div class="policy-box warn">
-              本工具只会下载你明确提供 DOI 且你有权限访问的文章。不支持绕过登录、验证码、付费墙或机构限制。勾选手动登录等待后，遇到学校图书馆、机构或出版社登录入口会暂停等你操作；仍无权限时才记录并跳过。
+              本工具只会下载你明确提供 DOI 且你有权限访问的文章。不支持绕过登录、验证码、付费墙或机构限制。勾选手动登录等待后，遇到学校图书馆、机构、出版社登录入口、验证码或安全验证会暂停等你操作；仍无权限时才记录并跳过。
             </div>
           </section>
           <section class="panel">
@@ -353,6 +353,10 @@
                 <label>
                   每批最大篇数
                   <input name="max_items" type="number" value="10" min="1" max="20" />
+                </label>
+                <label>
+                  手动等待秒数
+                  <input name="manual_login_timeout_seconds" type="number" value="900" min="30" max="3600" />
                 </label>
                 <label class="check-row">
                   <input type="checkbox" name="headed" />

@@ -63,6 +63,7 @@ class DoiDownloaderTest(unittest.TestCase):
         from app.doi_downloader import (
             DEFAULT_ARTICLE_DELAY_MAX,
             DEFAULT_ARTICLE_DELAY_MIN,
+            DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS,
             DEFAULT_PAGE_WAIT_MAX,
             DEFAULT_PAGE_WAIT_MIN,
             FAST_ARTICLE_DELAY_MAX,
@@ -77,7 +78,10 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(normal.article_delay_max, DEFAULT_ARTICLE_DELAY_MAX)
         self.assertEqual(normal.page_action_wait_min, DEFAULT_PAGE_WAIT_MIN)
         self.assertEqual(normal.page_action_wait_max, DEFAULT_PAGE_WAIT_MAX)
+        self.assertEqual(normal.manual_login_timeout_seconds, DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS)
         self.assertNotEqual(normal.page_action_wait_min, normal.article_delay_min)
+        self.assertEqual(resolve_settings({"manual_login_timeout_seconds": 5}).manual_login_timeout_seconds, 30)
+        self.assertEqual(resolve_settings({"manual_login_timeout_seconds": 7200}).manual_login_timeout_seconds, 3600)
 
         fast = resolve_settings({"fast_mode": True, "max_items": 99})
         self.assertTrue(fast.fast_mode)
@@ -109,7 +113,7 @@ class DoiDownloaderTest(unittest.TestCase):
 
         self.assertTrue(should_wait_for_manual_access("needs_login", enabled))
         self.assertTrue(should_wait_for_manual_access("blocked_by_access", enabled))
-        self.assertFalse(should_wait_for_manual_access("blocked_by_captcha", enabled))
+        self.assertTrue(should_wait_for_manual_access("blocked_by_captcha", enabled))
         self.assertFalse(should_wait_for_manual_access("blocked_by_access", disabled))
 
     def test_pdf_save_metadata_sidecar_existing_skip_and_hash(self) -> None:

@@ -26,7 +26,13 @@ def main() -> int:
     parser.add_argument("--out", help="Output directory. Defaults to data/raw/papers.")
     parser.add_argument("--max-items", type=int, default=10, help="Maximum DOI values per batch. The job still processes the full deduped list.")
     parser.add_argument("--headed", action="store_true", help="Open a visible browser window.")
-    parser.add_argument("--allow-manual-login", action="store_true", help="Pause for manual institutional login.")
+    parser.add_argument("--allow-manual-login", action="store_true", help="Pause for manual login, access, CAPTCHA, or security verification.")
+    parser.add_argument(
+        "--manual-login-timeout-seconds",
+        type=int,
+        default=None,
+        help="Seconds to keep the browser open while waiting for manual login or verification.",
+    )
     parser.add_argument("--fast-mode", action="store_true", help="Use 5-10s article delay, max 5 DOI values per batch.")
     parser.add_argument("--auto-ingest", action="store_true", help="Ingest downloaded PDFs into the knowledge base.")
     parser.add_argument("--rebuild-after-ingest", action="store_true", help="Rebuild indexes after optional ingestion.")
@@ -47,6 +53,7 @@ def main() -> int:
             "max_items": args.max_items,
             "headed": args.headed,
             "allow_manual_login": args.allow_manual_login,
+            "manual_login_timeout_seconds": args.manual_login_timeout_seconds,
             "fast_mode": args.fast_mode,
             "auto_ingest": args.auto_ingest,
             "rebuild_after_ingest": args.rebuild_after_ingest,
