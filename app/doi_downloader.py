@@ -73,9 +73,15 @@ CAPTCHA_TERMS = (
 )
 RATE_LIMIT_TERMS = ("too many requests", "rate limit", "suspicious activity", "unusual traffic")
 LOGIN_TERMS = (
-    "log in",
-    "login",
-    "sign in",
+    "please log in",
+    "please login",
+    "login required",
+    "authentication required",
+    "log in to access",
+    "login to access",
+    "sign in to access",
+    "sign in through your institution",
+    "sign in via your institution",
     "single sign-on",
     "shibboleth",
     "ezproxy",
