@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import subprocess
@@ -69,37 +70,60 @@ def _wait_for_cdp(port: int, timeout_seconds: int = 15) -> None:
 
 
 class ChromeHandoffDownloadSession:
-    def __init__(self, port: int, profile_dir: Path, keep_browser_open: bool):
+    def __init__(
+        self,
+        port: int,
+        profile_dir: Path,
+        keep_browser_open: bool,
+        *,
+        background: bool,
+        focus_on_manual: bool,
+        use_deepseek: bool,
+    ):
         self.port = port
         self.profile_dir = profile_dir
         self.keep_browser_open = keep_browser_open
+        self.background = background
+        self.focus_on_manual = focus_on_manual
+        self.use_deepseek = use_deepseek
         self.process: subprocess.Popen[str] | None = None
         self.playwright = None
         self.browser = None
         self.context = None
+        self.page = None
 
     def __enter__(self) -> "ChromeHandoffDownloadSession":
         from playwright.sync_api import sync_playwright  # type: ignore
 
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         if not _cdp_ready(self.port):
-            self.process = subprocess.Popen(
-                [
-                    _chrome_binary(),
-                    f"--remote-debugging-port={self.port}",
-                    f"--user-data-dir={self.profile_dir}",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "about:blank",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True,
-            )
+            args = [
+                f"--remote-debugging-port={self.port}",
+                f"--user-data-dir={self.profile_dir}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--start-minimized",
+                "about:blank",
+            ]
+            if self.background and sys.platform == "darwin":
+                self.process = subprocess.Popen(
+                    ["open", "-g", "-n", "-a", "Google Chrome", "--args", *args],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+            else:
+                self.process = subprocess.Popen(
+                    [_chrome_binary(), *args],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
             _wait_for_cdp(self.port)
         self.playwright = sync_playwright().start()
         self.browser = self.playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{self.port}")
         self.context = self.browser.contexts[0]
+        self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
         return self
 
     def __exit__(self, *_exc: object) -> None:
@@ -130,8 +154,12 @@ class ChromeHandoffDownloadSession:
     ) -> tuple[str | None, str | None, dict[str, Any]]:
         if state == "blocked_by_access" or not should_wait_for_manual_access(state, settings):
             return state, reason, diagnostics
+        if self.focus_on_manual and sys.platform == "darwin":
+            subprocess.run(["open", "-a", "Google Chrome"], check=False)
         print(
-            f"需要你在 Chrome handoff 窗口完成登录/验证：{_reason_with_evidence(reason, diagnostics) or state}",
+            "需要你在 Chrome handoff 窗口完成登录/验证。"
+            f"页面已停在后台专用 Chrome profile：{page.url}\n"
+            f"原因：{_reason_with_evidence(reason, diagnostics) or state}",
             flush=True,
         )
         deadline = time.monotonic() + settings.manual_login_timeout_seconds
@@ -149,9 +177,36 @@ class ChromeHandoffDownloadSession:
                 break
         return state, reason, diagnostics
 
+    def _pdf_bytes_from_page_fetch(self, page: Any, pdf_url: str) -> tuple[int | None, str, bytes | None]:
+        try:
+            result = page.evaluate(
+                """
+                async (url) => {
+                  const response = await fetch(url, { credentials: 'include' });
+                  const buffer = await response.arrayBuffer();
+                  const bytes = new Uint8Array(buffer);
+                  let binary = '';
+                  const chunkSize = 0x8000;
+                  for (let i = 0; i < bytes.length; i += chunkSize) {
+                    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+                  }
+                  return {
+                    status: response.status,
+                    contentType: response.headers.get('content-type') || '',
+                    bodyBase64: btoa(binary),
+                  };
+                }
+                """,
+                pdf_url,
+            )
+            body = _extract_pdf_bytes(base64.b64decode(result.get("bodyBase64") or ""))
+            return int(result.get("status") or 0), str(result.get("contentType") or ""), body
+        except Exception:
+            return None, "", None
+
     def download(self, doi: str, settings: Any, metadata: dict[str, Any], artifacts_dir: Path) -> DownloadAttempt:
         assert self.context is not None
-        page = self.context.new_page()
+        page = self.page or self.context.new_page()
         landing_url = None
         try:
             target_url = f"https://doi.org/{doi}"
@@ -176,6 +231,23 @@ class ChromeHandoffDownloadSession:
                 )
 
             links = _pdf_links_from_page(page)
+            if self.use_deepseek:
+                advice = _deepseek_page_advice(page, links)
+                if advice.get("status") == "access_denied":
+                    screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
+                    return DownloadAttempt(
+                        "blocked_by_access",
+                        page.url,
+                        domain,
+                        None,
+                        None,
+                        advice.get("reason") or "DeepSeek page advisor classified page as access denied",
+                        screenshot,
+                        html,
+                        {"deepseek_page_advice": advice},
+                    )
+                if advice.get("pdf_url"):
+                    links = [{"href": advice["pdf_url"], "text": "deepseek_page_advice", "source": "deepseek"}]
             if not links:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
                 return DownloadAttempt("failed", page.url, domain, None, None, "No reliable PDF link found", screenshot, html)
@@ -185,16 +257,22 @@ class ChromeHandoffDownloadSession:
             request_status = None
             request_text = ""
             request_content_type = ""
+            fetch_status, fetch_content_type, fetch_body = self._pdf_bytes_from_page_fetch(page, pdf_url)
+            if fetch_body is not None:
+                pdf_body = fetch_body
+            elif fetch_status:
+                request_status = fetch_status
+                request_content_type = fetch_content_type
             try:
-                pdf_response = self.context.request.get(pdf_url, timeout=60000)
-                request_status = pdf_response.status
-                request_content_type = (pdf_response.headers.get("content-type", "") or "").lower()
-                request_body = pdf_response.body()
-                request_text = request_body[:3000].decode("utf-8", errors="ignore")
-                if "application/pdf" in request_content_type or request_body.startswith(b"%PDF"):
-                    pdf_body = request_body
+                if pdf_body is None:
+                    pdf_response = self.context.request.get(pdf_url, timeout=60000)
+                    request_status = pdf_response.status
+                    request_content_type = (pdf_response.headers.get("content-type", "") or "").lower()
+                    request_body = pdf_response.body()
+                    request_text = request_body[:3000].decode("utf-8", errors="ignore")
+                    pdf_body = _extract_pdf_bytes(request_body)
             except Exception:
-                pdf_body = None
+                pass
 
             if pdf_body is None:
                 # Some publishers reject API-style fetches but allow the real browser page after login.
@@ -203,8 +281,7 @@ class ChromeHandoffDownloadSession:
                 if nav_response:
                     browser_body = nav_response.body()
                     browser_content_type = (nav_response.headers.get("content-type", "") or "").lower()
-                    if "application/pdf" in browser_content_type or browser_body.startswith(b"%PDF"):
-                        pdf_body = browser_body
+                    pdf_body = _extract_pdf_bytes(browser_body)
 
             if pdf_body is not None:
                 return DownloadAttempt("downloaded", page.url, domain, pdf_url, pdf_body)
@@ -239,10 +316,95 @@ class ChromeHandoffDownloadSession:
                 html,
             )
         finally:
-            try:
-                page.close()
-            except Exception:
-                pass
+            pass
+
+
+def _extract_pdf_bytes(body: bytes) -> bytes | None:
+    offset = body.find(b"%PDF")
+    if 0 <= offset <= 1024:
+        return body[offset:]
+    return None
+
+
+def _page_link_candidates(page: Any) -> list[dict[str, str]]:
+    try:
+        return page.evaluate(
+            """
+            () => Array.from(document.querySelectorAll('a[href], button, [role="button"]')).slice(0, 80).map((el) => ({
+              tag: el.tagName,
+              text: (el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 160),
+              href: el.href || el.getAttribute('href') || '',
+              aria: el.getAttribute('aria-label') || '',
+            }))
+            """
+        )
+    except Exception:
+        return []
+
+
+def _deepseek_page_advice(page: Any, links: list[dict[str, str]]) -> dict[str, Any]:
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        return {}
+    base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").rstrip("/")
+    model = os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash"
+    try:
+        page_state = page.evaluate(
+            """
+            () => ({
+              url: location.href,
+              title: document.title,
+              text: (document.body?.innerText || '').slice(0, 5000),
+            })
+            """
+        )
+    except Exception:
+        return {}
+    payload = {
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You classify publisher article pages for an authorized DOI downloader. "
+                    "Never suggest bypassing CAPTCHA, paywalls, login, or access controls. "
+                    "Return only JSON with keys status, pdf_url, reason. "
+                    "status must be one of access_denied, login_required, captcha_or_security, "
+                    "pdf_available, no_pdf_unknown. pdf_url must be one of the provided candidate hrefs or empty."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "page": page_state,
+                        "existing_pdf_links": links[:20],
+                        "link_candidates": _page_link_candidates(page),
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+        "max_tokens": 300,
+    }
+    request = urllib.request.Request(
+        base_url + "/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:  # nosec - user-configured DeepSeek endpoint
+            data = json.loads(response.read().decode("utf-8"))
+        content = data["choices"][0]["message"]["content"]
+        parsed = json.loads(content)
+        allowed_hrefs = {item.get("href") for item in [*links, *_page_link_candidates(page)] if item.get("href")}
+        if parsed.get("pdf_url") and parsed["pdf_url"] not in allowed_hrefs:
+            parsed["pdf_url"] = ""
+        return parsed
+    except Exception as exc:
+        return {"status": "no_pdf_unknown", "pdf_url": "", "reason": f"DeepSeek advisor failed: {exc}"}
 
 
 def main() -> int:
@@ -257,6 +419,9 @@ def main() -> int:
     parser.add_argument("--chrome-debug-port", type=int, default=9223)
     parser.add_argument("--chrome-profile", default=str(CHROME_HANDOFF_PROFILE))
     parser.add_argument("--keep-browser-open", action="store_true")
+    parser.add_argument("--foreground", action="store_true", help="Allow Chrome to come to the foreground when launched.")
+    parser.add_argument("--focus-on-manual", action="store_true", help="Bring Chrome forward only when user action is needed.")
+    parser.add_argument("--use-deepseek", action="store_true", help="Use DeepSeek API for page-state/link advice when DEEPSEEK_API_KEY is set.")
     parser.add_argument("--auto-ingest", action="store_true")
     parser.add_argument("--rebuild-after-ingest", action="store_true")
     args = parser.parse_args()
@@ -273,6 +438,9 @@ def main() -> int:
         args.chrome_debug_port,
         Path(args.chrome_profile).expanduser(),
         args.keep_browser_open,
+        background=not args.foreground,
+        focus_on_manual=args.focus_on_manual,
+        use_deepseek=args.use_deepseek,
     ) as session:
         result = run_doi_download_job(
             "\n".join(parts),

@@ -210,7 +210,9 @@ python3 -m playwright install chromium
 ./scripts/download_by_doi_chrome_handoff.py --doi-file dois.txt --auto-ingest --manual-login-timeout-seconds 900
 ```
 
-该模式启动一个真实 Chrome handoff 会话；用户只负责登录/验证，脚本在页面通过后自动找 PDF 链接、下载、保存 metadata，并按需加入文档库。若页面明确显示学校未提供访问权限，会记录为 `blocked_by_access` 并继续下一篇。
+该模式启动一个独立的真实 Chrome handoff 会话，默认后台运行并复用同一个标签页，不会每篇 DOI 都弹到前台；用户只负责登录/验证，脚本在页面通过后自动找 PDF 链接、下载、保存 metadata，并按需加入文档库。若页面明确显示学校未提供访问权限，会记录为 `blocked_by_access` 并继续下一篇。可选 `--focus-on-manual` 只在需要人工操作时把 Chrome 带到前台。
+
+如需让 DeepSeek 辅助判断页面状态或 PDF 链接候选，可设置 `DEEPSEEK_API_KEY` 后加 `--use-deepseek`。该模式只发送页面标题、可见文本摘要和链接候选，不发送 cookies、账号信息或 PDF 文件。
 
 默认不自动 ingestion；如需下载后加入文档库：
 

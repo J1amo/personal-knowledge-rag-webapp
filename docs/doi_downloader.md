@@ -69,7 +69,9 @@ If a publisher security page loops inside the automated browser, use the real-br
 ./scripts/download_by_doi_chrome_handoff.py --doi-file dois.txt --auto-ingest --manual-login-timeout-seconds 900
 ```
 
-This starts a real Chrome handoff session. The user only completes login/security verification; after the page clears, the script automatically finds the PDF link, downloads it, writes the DOI metadata sidecar, optionally ingests it, and continues to the next DOI. If the page clearly says the institution does not provide access, the item is recorded as `blocked_by_access` and the job continues.
+This starts a separate real Chrome handoff session. It runs in the background by default and reuses one tab instead of popping up a new foreground page for every DOI. The user only completes login/security verification; after the page clears, the script automatically finds the PDF link, downloads it, writes the DOI metadata sidecar, optionally ingests it, and continues to the next DOI. If the page clearly says the institution does not provide access, the item is recorded as `blocked_by_access` and the job continues.
+
+Optional DeepSeek page advice can be enabled with `DEEPSEEK_API_KEY` and `--use-deepseek`. The advisor receives page title, visible text summary, and link candidates only; cookies, account data, and PDF files are not sent.
 
 Fast mode, only for small open-access or explicitly confirmed batches:
 
