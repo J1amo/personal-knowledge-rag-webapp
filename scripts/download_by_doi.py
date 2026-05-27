@@ -25,13 +25,17 @@ def main() -> int:
     parser.add_argument("--doi-file", help="Text file containing DOI values.")
     parser.add_argument("--out", help="Output directory. Defaults to data/raw/papers.")
     parser.add_argument("--max-items", type=int, default=10, help="Maximum DOI values per batch. The job still processes the full deduped list.")
-    parser.add_argument("--headed", action="store_true", help="Open a visible browser window.")
-    parser.add_argument("--allow-manual-login", action="store_true", help="Pause for manual login, access, CAPTCHA, or security verification.")
+    parser.add_argument("--headed", action="store_true", help="Debug only: show the automation browser for the whole run.")
+    parser.add_argument(
+        "--allow-manual-login",
+        action="store_true",
+        help="Allow manual waiting on login or access pages when --headed is also enabled.",
+    )
     parser.add_argument(
         "--manual-login-timeout-seconds",
         type=int,
         default=None,
-        help="Seconds to keep the browser open while waiting for manual login or verification.",
+        help="Seconds to wait on login or access pages when visible manual waiting is enabled.",
     )
     parser.add_argument("--fast-mode", action="store_true", help="Use 5-10s article delay, max 5 DOI values per batch.")
     parser.add_argument("--auto-ingest", action="store_true", help="Ingest downloaded PDFs into the knowledge base.")

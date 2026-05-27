@@ -196,13 +196,13 @@ python3 -m playwright install chromium
 
 `--max-items` 表示每批最多处理多少个 DOI；同一次任务会按批处理完整的去重 DOI 列表。
 
-需要机构登录时：
+可见浏览器调试/需要机构登录时：
 
 ```bash
 ./scripts/download_by_doi.py --doi-file dois.txt --headed --allow-manual-login --manual-login-timeout-seconds 900
 ```
 
-勾选/传入手动等待后，登录页和机构访问页会保持可见浏览器，等待用户完成合法授权访问；验证码和出版社安全验证页会记录为阻断状态，不再让自动化浏览器反复冲撞。未解决的验证码、429 或可疑流量仍会停止批次。
+默认 DOI 下载在后台执行，不应该打开可见自动化浏览器。`--headed` 是显式调试模式，会全程显示 Playwright 浏览器；只有同时启用 `--headed` 和手动等待时，登录页和机构访问页才会保持这个可见浏览器，等待用户完成合法授权访问。验证码和出版社安全验证页会记录为阻断状态，不再让自动化浏览器反复冲撞。未解决的验证码、429 或可疑流量仍会停止批次。
 
 如果出版社安全验证在自动化浏览器里循环不通过，改用真实浏览器人工接管模式：
 
@@ -213,6 +213,8 @@ python3 -m playwright install chromium
 该模式启动一个独立的真实 Chrome handoff 会话，默认后台运行并复用同一个标签页，不会每篇 DOI 都弹到前台；用户只负责登录/验证，脚本在页面通过后自动找 PDF 链接、下载、保存 metadata，并按需加入文档库。若页面明确显示学校未提供访问权限，会记录为 `blocked_by_access` 并继续下一篇。可选 `--focus-on-manual` 只在需要人工操作时把 Chrome 带到前台。
 
 Web UI 默认勾选 DeepSeek 页面判断，但只有设置 `DEEPSEEK_API_KEY` 后才会实际调用；CLI 默认同样启用，可用 `--no-deepseek` 关闭。该模式只发送页面标题、可见文本摘要和链接候选，不发送 cookies、账号信息或 PDF 文件，也不会绕过验证码、登录、付费墙或访问控制。
+
+Codex 内置浏览器目前是 Codex 调试界面，不是 Web App 后端可直接调用的下载器。Web UI 默认走后台 Playwright；只有显式勾选“调试：全程显示自动化浏览器”才会弹出自动化浏览器窗口。
 
 默认不自动 ingestion；如需下载后加入文档库：
 

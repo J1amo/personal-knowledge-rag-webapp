@@ -146,11 +146,14 @@ class DoiDownloaderTest(unittest.TestCase):
 
         enabled = resolve_settings({"headed": True, "allow_manual_login": True})
         disabled = resolve_settings({"headed": True, "allow_manual_login": False})
+        background = resolve_settings({"headed": False, "allow_manual_login": True})
 
         self.assertTrue(should_wait_for_manual_access("needs_login", enabled))
         self.assertTrue(should_wait_for_manual_access("blocked_by_access", enabled))
         self.assertFalse(should_wait_for_manual_access("blocked_by_captcha", enabled))
         self.assertFalse(should_wait_for_manual_access("blocked_by_access", disabled))
+        self.assertFalse(should_wait_for_manual_access("needs_login", background))
+        self.assertFalse(should_wait_for_manual_access("blocked_by_access", background))
 
     def test_campus_only_platform_suppresses_manual_login_wait(self) -> None:
         from app.doi_downloader import apply_candidate_manual_wait_policy

@@ -55,13 +55,13 @@ DOI list:
 
 `--max-items` is the per-batch size. A single job still processes the full deduped DOI list, splitting it into batches of at most that many DOI values.
 
-Manual institutional login:
+Visible browser debugging and manual institutional login:
 
 ```bash
 ./scripts/download_by_doi.py --doi-file dois.txt --out data/raw/papers --headed --allow-manual-login --manual-login-timeout-seconds 900
 ```
 
-With headed browser mode plus manual waiting enabled, login and institutional access pages keep the browser open so the user can complete authorized access manually. CAPTCHA and publisher security verification pages are recorded as blocked states instead of being driven repeatedly by the automated browser.
+By default, DOI downloads run in the background and should not open a visible automation browser. `--headed` is an explicit debug mode that shows the Playwright browser for the whole run. Only when both `--headed` and manual waiting are enabled can login and institutional access pages keep that visible browser open so the user can complete authorized access manually. CAPTCHA and publisher security verification pages are recorded as blocked states instead of being driven repeatedly by the automated browser.
 
 If a publisher security page loops inside the automated browser, use the real-browser manual assist mode:
 
@@ -72,6 +72,8 @@ If a publisher security page loops inside the automated browser, use the real-br
 This starts a separate real Chrome handoff session. It runs in the background by default and reuses one tab instead of popping up a new foreground page for every DOI. The user only completes login/security verification; after the page clears, the script automatically finds the PDF link, downloads it, writes the DOI metadata sidecar, optionally ingests it, and continues to the next DOI. If the page clearly says the institution does not provide access, the item is recorded as `blocked_by_access` and the job continues.
 
 The web UI enables DeepSeek page advice by default, but it only makes an API call when `DEEPSEEK_API_KEY` is configured in `.env` or the service environment. CLI usage enables the same default unless `--no-deepseek` is passed. The advisor receives page title, visible text summary, and link candidates only; cookies, account data, and PDF files are not sent. It cannot bypass CAPTCHA, login, paywalls, or access controls.
+
+The Codex in-app browser is a Codex-side debugging surface, not a callable backend inside this local Web App yet. Until a dedicated backend is implemented, the Web UI uses background Playwright by default and visible Playwright only for explicit debug/manual-wait runs.
 
 Fast mode, only for small open-access or explicitly confirmed batches:
 
