@@ -106,6 +106,14 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(
             classify_access_block(
                 200,
+                "https://pubs.rsc.org/en/content/articlelanding/2013/nr/c3nr33738c/unauth",
+                '"isAccessibleForFree": "False"',
+            )[0],
+            "blocked_by_access",
+        )
+        self.assertEqual(
+            classify_access_block(
+                200,
                 "https://pubs.acs.org/article",
                 "pubs.acs.org 正在进行安全验证 正在验证 由 Cloudflare 提供的性能和安全服务",
             )[0],

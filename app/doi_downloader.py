@@ -57,6 +57,8 @@ ACCESS_TERMS = (
     "license required",
     "purchase access",
     "access is not provided via",
+    "/unauth",
+    'accessibleforfree": "false',
 )
 CAPTCHA_TERMS = (
     "captcha",
@@ -1607,14 +1609,15 @@ class PlaywrightDownloadSession:
             pdf_status = pdf_response.status
             pdf_body = pdf_response.body()
             pdf_text = pdf_body[:3000].decode("utf-8", errors="ignore")
-            state, reason, diagnostics = _classify_access_block_detail(pdf_status, pdf_url, pdf_text)
+            pdf_final_url = getattr(pdf_response, "url", None) or pdf_url
+            state, reason, diagnostics = _classify_access_block_detail(pdf_status, pdf_final_url, pdf_text)
             if state:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
                 return DownloadAttempt(
                     state,
                     page.url,
                     domain,
-                    pdf_url,
+                    pdf_final_url,
                     None,
                     _reason_with_evidence(reason, diagnostics),
                     screenshot,
@@ -1623,8 +1626,8 @@ class PlaywrightDownloadSession:
                 )
             content_type = (pdf_response.headers.get("content-type", "") or "").lower()
             if "application/pdf" not in content_type and not pdf_body.startswith(b"%PDF"):
-                return DownloadAttempt("failed", page.url, domain, pdf_url, None, "PDF link did not return a PDF")
-            return DownloadAttempt("downloaded", page.url, domain, pdf_url, pdf_body)
+                return DownloadAttempt("failed", page.url, domain, pdf_final_url, None, "PDF link did not return a PDF")
+            return DownloadAttempt("downloaded", page.url, domain, pdf_final_url, pdf_body)
         except Exception as exc:
             screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
             return DownloadAttempt("failed", landing_url or page.url, publisher_domain(landing_url or page.url), None, None, str(exc), screenshot, html)

@@ -294,6 +294,7 @@ class ChromeHandoffDownloadSession:
                 if pdf_body is None:
                     pdf_response = self.context.request.get(pdf_url, timeout=60000)
                     request_status = pdf_response.status
+                    pdf_url = getattr(pdf_response, "url", None) or pdf_url
                     request_content_type = (pdf_response.headers.get("content-type", "") or "").lower()
                     request_body = pdf_response.body()
                     request_text = request_body[:3000].decode("utf-8", errors="ignore")
