@@ -246,6 +246,55 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(result["summary"]["processed_count"], 2)
         self.assertEqual(result["summary"]["unprocessed_count"], 0)
 
+    def test_max_items_is_batch_size_and_processes_full_list(self) -> None:
+        from app.doi_downloader import DownloadAttempt, run_doi_download_job
+
+        pdf_path = self.root / "mock.pdf"
+        make_pdf(pdf_path, "Mock DOI PDF")
+        sleeps = []
+
+        def fake_runner(doi, _settings, _metadata, _artifacts_dir):
+            return DownloadAttempt(
+                status="downloaded",
+                landing_url=f"https://publisher.test/{doi}",
+                publisher_domain="publisher.test",
+                pdf_url=f"https://publisher.test/{doi}.pdf",
+                pdf_bytes=pdf_path.read_bytes(),
+            )
+
+        result = run_doi_download_job(
+            "\n".join(
+                [
+                    "10.1234/item-1",
+                    "10.1234/item-2",
+                    "10.1234/item-3",
+                    "10.1234/item-4",
+                    "10.1234/item-5",
+                ]
+            ),
+            {"out_dir": str(self.root / "papers"), "max_items": 2},
+            browser_runner=fake_runner,
+            metadata_fetcher=lambda doi: {
+                "doi": doi,
+                "title": "Mock DOI PDF",
+                "authors": ["Grace Hopper"],
+                "year": 2026,
+                "publisher": "publisher.test",
+            },
+            sleeper=sleeps.append,
+        )
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(len(result["items"]), 5)
+        self.assertEqual(result["summary"]["requested_count"], 5)
+        self.assertEqual(result["summary"]["processed_count"], 5)
+        self.assertEqual(result["summary"]["unprocessed_count"], 0)
+        self.assertEqual(result["summary"]["batch_size"], 2)
+        self.assertEqual(result["summary"]["batch_count"], 3)
+        self.assertEqual(result["summary"]["completed_batches"], 3)
+        self.assertEqual([item["batch_index"] for item in result["items"]], [1, 1, 2, 2, 3])
+        self.assertEqual(len(sleeps), 4)
+
 
 if __name__ == "__main__":
     unittest.main()

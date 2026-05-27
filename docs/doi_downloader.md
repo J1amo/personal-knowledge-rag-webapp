@@ -53,6 +53,8 @@ DOI list:
 ./scripts/download_by_doi.py --doi-file dois.txt --out data/raw/papers --max-items 10
 ```
 
+`--max-items` is the per-batch size. A single job still processes the full deduped DOI list, splitting it into batches of at most that many DOI values.
+
 Manual institutional login:
 
 ```bash
@@ -83,6 +85,7 @@ Use the `DOI 下载器` page to:
 
 - paste a DOI or DOI list;
 - choose a save directory;
+- set the per-batch DOI limit while still processing the full list;
 - run with or without visible browser mode;
 - allow manual login waiting;
 - enable fast mode;
@@ -112,7 +115,7 @@ Fast mode:
 
 ```text
 5-10 seconds
-max 5 items
+max 5 items per batch
 default off
 ```
 

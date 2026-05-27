@@ -184,13 +184,14 @@ def doi_downloader_status() -> dict[str, Any]:
         "log_dir": str(LOG_DIR),
         "default_policy": {
             "concurrency": 1,
-            "max_items_per_run": DEFAULT_MAX_ITEMS,
-            "absolute_max_items_per_run": ABSOLUTE_MAX_ITEMS,
+            "batch_mode": "process_all_deduped_dois",
+            "default_batch_size": DEFAULT_MAX_ITEMS,
+            "absolute_max_batch_size": ABSOLUTE_MAX_ITEMS,
             "page_action_wait_seconds": [DEFAULT_PAGE_WAIT_MIN, DEFAULT_PAGE_WAIT_MAX],
             "article_delay_seconds": [DEFAULT_ARTICLE_DELAY_MIN, DEFAULT_ARTICLE_DELAY_MAX],
             "fast_mode_default": False,
             "fast_mode_article_delay_seconds": [FAST_ARTICLE_DELAY_MIN, FAST_ARTICLE_DELAY_MAX],
-            "fast_mode_max_items": FAST_MAX_ITEMS,
+            "fast_mode_max_batch_size": FAST_MAX_ITEMS,
         },
         "setup_hint": (
             "Install with: python -m pip install playwright && python -m playwright install chromium"
@@ -725,6 +726,12 @@ def _sleep_article(settings: DoiDownloadSettings, sleeper: Callable[[float], Non
     return seconds
 
 
+def _batch_count(total_items: int, batch_size: int) -> int:
+    if total_items <= 0:
+        return 0
+    return (total_items + batch_size - 1) // batch_size
+
+
 def run_doi_download_job(
     doi_text: str,
     settings: dict[str, Any] | DoiDownloadSettings | None = None,
@@ -736,14 +743,15 @@ def run_doi_download_job(
     init_db()
     resolved = resolve_settings(settings)
     all_dois = dedupe_dois(parse_doi_list(doi_text))
-    selected = all_dois[: resolved.max_items]
-    job_id = _create_job(selected, resolved, len(all_dois))
+    batch_size = resolved.max_items
+    total_batches = _batch_count(len(all_dois), batch_size)
+    job_id = _create_job(all_dois, resolved, len(all_dois))
     out_dir = Path(resolved.out_dir).expanduser()
     artifacts_dir = SNAPSHOT_DIR / job_id
     items: list[dict[str, Any]] = []
     stop_reason = None
 
-    if not selected:
+    if not all_dois:
         summary = {
             "status_counts": {"failed": 0},
             "message": "No valid DOI supplied",
@@ -751,6 +759,9 @@ def run_doi_download_job(
             "requested_count": 0,
             "processed_count": 0,
             "unprocessed_count": 0,
+            "batch_size": batch_size,
+            "batch_count": 0,
+            "completed_batches": 0,
             "stopped_reason": "No valid DOI supplied",
             "log_dir": str(LOG_DIR),
             "profile_dir": str(PROFILE_DIR),
@@ -766,7 +777,9 @@ def run_doi_download_job(
         runner_context = PlaywrightDownloadSession(resolved)
 
     with runner_context as runner:
-        for idx, doi in enumerate(selected, start=1):
+        for idx, doi in enumerate(all_dois, start=1):
+            batch_index = (idx - 1) // batch_size + 1
+            batch_item_index = (idx - 1) % batch_size + 1
             item_id = _create_item(job_id, doi)
             metadata = metadata_fetcher(doi)
             metadata = {"doi": doi, **metadata}
@@ -781,13 +794,31 @@ def run_doi_download_job(
                     metadata_path=existing.get("metadata_path"),
                     file_hash=existing.get("file_hash"),
                 )
-                items.append({"id": item_id, "doi": doi, "status": "skipped_existing", **existing})
+                items.append(
+                    {
+                        "id": item_id,
+                        "doi": doi,
+                        "status": "skipped_existing",
+                        "batch_index": batch_index,
+                        "batch_item_index": batch_item_index,
+                        **existing,
+                    }
+                )
                 continue
 
             if browser_runner is None and find_spec("playwright") is None:
                 reason = "Playwright is not installed; run python -m pip install playwright and python -m playwright install chromium"
                 _update_item(item_id, status="failed", failure_reason=reason)
-                items.append({"id": item_id, "doi": doi, "status": "failed", "failure_reason": reason})
+                items.append(
+                    {
+                        "id": item_id,
+                        "doi": doi,
+                        "status": "failed",
+                        "failure_reason": reason,
+                        "batch_index": batch_index,
+                        "batch_item_index": batch_item_index,
+                    }
+                )
                 continue
 
             _update_item(item_id, status="resolving")
@@ -832,11 +863,22 @@ def run_doi_download_job(
                             "metadata_path": saved["metadata_path"],
                             "file_hash": saved["file_hash"],
                             "ingestion_source_id": ingestion_source_id,
+                            "batch_index": batch_index,
+                            "batch_item_index": batch_item_index,
                         }
                     )
                 except Exception as exc:
                     _update_item(item_id, status="failed", failure_reason=str(exc))
-                    items.append({"id": item_id, "doi": doi, "status": "failed", "failure_reason": str(exc)})
+                    items.append(
+                        {
+                            "id": item_id,
+                            "doi": doi,
+                            "status": "failed",
+                            "failure_reason": str(exc),
+                            "batch_index": batch_index,
+                            "batch_item_index": batch_item_index,
+                        }
+                    )
             else:
                 _update_item(
                     item_id,
@@ -860,13 +902,15 @@ def run_doi_download_job(
                         "screenshot_path": attempt.screenshot_path,
                         "html_snapshot_path": attempt.html_snapshot_path,
                         "diagnostics": attempt.diagnostics,
+                        "batch_index": batch_index,
+                        "batch_item_index": batch_item_index,
                     }
                 )
                 if attempt.status in STOP_BATCH_STATUSES:
                     stop_reason = attempt.failure_reason or attempt.status
                     break
 
-            if idx < len(selected) and not stop_reason:
+            if idx < len(all_dois) and not stop_reason:
                 _sleep_article(resolved, sleeper)
 
     counts: dict[str, int] = {}
@@ -883,9 +927,12 @@ def run_doi_download_job(
     summary = {
         "status_counts": counts,
         "input_count": len(all_dois),
-        "requested_count": len(selected),
+        "requested_count": len(all_dois),
         "processed_count": len(items),
-        "unprocessed_count": max(0, len(selected) - len(items)),
+        "unprocessed_count": max(0, len(all_dois) - len(items)),
+        "batch_size": batch_size,
+        "batch_count": total_batches,
+        "completed_batches": _batch_count(len(items), batch_size),
         "stopped_reason": stop_reason,
         "stop_batch_statuses": sorted(STOP_BATCH_STATUSES),
         "continue_item_statuses": ["blocked_by_access"],

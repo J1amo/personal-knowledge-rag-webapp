@@ -587,7 +587,7 @@ async function loadDoiDownloads() {
     { label: "job_id", render: (row) => `<code>${esc(row.job_id)}</code>` },
     { label: "状态", render: (row) => esc(labelFrom(statusLabel, row.status)) },
     { label: "输入", key: "input_count" },
-    { label: "请求", key: "requested_count" },
+    { label: "总 DOI", key: "requested_count" },
     { label: "摘要", render: (row) => `<code>${esc(JSON.stringify(row.summary || {}))}</code>` },
     { label: "更新时间", key: "updated_at" },
   ])}`;

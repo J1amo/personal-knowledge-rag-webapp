@@ -194,6 +194,8 @@ python3 -m playwright install chromium
 ./scripts/download_by_doi.py --doi-file dois.txt --out data/raw/papers --max-items 10
 ```
 
+`--max-items` 表示每批最多处理多少个 DOI；同一次任务会按批处理完整的去重 DOI 列表。
+
 需要机构登录时：
 
 ```bash
