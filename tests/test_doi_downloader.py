@@ -259,6 +259,127 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertIn("contentplatform_userguide", source)
         self.assertIn("wp-content/uploads", source)
 
+    def test_serials_solutions_candidates_keep_only_fulltext_routes(self) -> None:
+        from app.doi_downloader import parse_serials_solutions_candidates, serials_solutions_lookup_url
+
+        lookup_url = serials_solutions_lookup_url("10.1021/acs.nanolett.3c04180")
+        self.assertIn("SS_LibHash=JN2XS2WB8U", lookup_url)
+        self.assertIn("sid=sersol%3AuniqueIDQuery", lookup_url)
+
+        html = """
+        <a href="./log?L=JN2XS2WB8U&amp;U=https%3A%2F%2Ftsukuba.idm.oclc.org%2Flogin%3Furl%3Dhttps%3A%2F%2Fpubs.acs.org%2Fdoi%2F10.1021%2Facs.nanolett.3c04180">フルテキストを見る</a>
+        <a href="https://hal.science/hal-04296517v1/document">オープンアクセスバージョンを入手</a>
+        <a href="http://www.refworks.com/express/expressimport.asp">RefWorks</a>
+        <a href="?SS_Page=refiner&amp;SS_doi=10.1021/acs.nanolett.3c04180">書誌情報を変更して再検索する</a>
+        <a href="https://tsukuba.idm.oclc.org/login?url=https://ulrichsweb.serialssolutions.com/api/openurl?issn=15306984">Ulrichsweb.com</a>
+        """
+
+        candidates = parse_serials_solutions_candidates(html)
+        self.assertEqual([item["text"] for item in candidates], ["フルテキストを見る", "オープンアクセスバージョンを入手"])
+        self.assertEqual(candidates[0]["publisher_domain"], "tsukuba.idm.oclc.org")
+        self.assertEqual(candidates[1]["publisher_domain"], "hal.science")
+
+    def test_serials_solutions_unwraps_public_fulltext_proxy_links(self) -> None:
+        from app.doi_downloader import parse_serials_solutions_candidates
+
+        html = """
+        <a href="./log?L=JN2XS2WB8U&amp;U=https%3A%2F%2Ftsukuba.idm.oclc.org%2Flogin%3Furl%3Dhttps%3A%2F%2Fwww.proquest.com%2Fdocview%2F1782088926">フルテキストを見る</a>
+        <a href="./log?L=JN2XS2WB8U&amp;U=https%3A%2F%2Ftsukuba.idm.oclc.org%2Flogin%3Furl%3Dhttps%3A%2F%2Fwww.ncbi.nlm.nih.gov%2Fpmc%2Farticles%2Fdoi%2F10.1186%2Fs11671-016-1396-7">フルテキストを見る</a>
+        """
+
+        candidates = parse_serials_solutions_candidates(html)
+        self.assertEqual(candidates[0]["href"], "https://www.ncbi.nlm.nih.gov/pmc/articles/doi/10.1186/s11671-016-1396-7")
+        self.assertEqual(candidates[0]["publisher_domain"], "ncbi.nlm.nih.gov")
+
+    def test_hal_api_file_candidates_extract_public_pdf_file(self) -> None:
+        from app.doi_downloader import hal_api_lookup_url, parse_hal_api_file_candidates
+
+        candidate = {
+            "href": "https://hal.science/hal-04296517v1/document",
+            "text": "オープンアクセスバージョンを入手",
+            "source": "serials_solutions",
+            "priority": 15,
+            "publisher_domain": "hal.science",
+        }
+        payload = {
+            "response": {
+                "docs": [
+                    {
+                        "files_s": [
+                            "https://hal.science/hal-04296517/file/FINAL%20VERSION.pdf",
+                        ]
+                    }
+                ]
+            }
+        }
+
+        self.assertIn("halId_s%3Ahal-04296517", hal_api_lookup_url(candidate["href"]) or "")
+        results = parse_hal_api_file_candidates(candidate, json.dumps(payload))
+        self.assertEqual(results[0]["source"], "hal_api")
+        self.assertEqual(results[0]["href"], "https://hal.science/hal-04296517/file/FINAL%20VERSION.pdf")
+
+    def test_doi_landing_candidates_append_direct_fallback(self) -> None:
+        from app.doi_downloader import doi_landing_candidates
+
+        with patch(
+            "app.doi_downloader.fetch_serials_solutions_candidates",
+            return_value=[
+                {
+                    "href": "https://tsukuba.idm.oclc.org/login?url=https://pubs.acs.org/doi/10.1234/test",
+                    "text": "フルテキストを見る",
+                    "source": "serials_solutions",
+                    "priority": 10,
+                    "publisher_domain": "tsukuba.idm.oclc.org",
+                }
+            ],
+        ):
+            candidates = doi_landing_candidates("10.1234/test", {"publisher": "American Chemical Society"})
+
+        self.assertEqual(candidates[0]["source"], "serials_solutions")
+        self.assertEqual(candidates[-1]["href"], "https://doi.org/10.1234/test")
+        self.assertEqual(candidates[-1]["authorized_platform"]["name"], "American Chemical Society Journals")
+
+    def test_doi_landing_candidates_skip_non_authorized_direct_fallback(self) -> None:
+        from app.doi_downloader import doi_landing_candidates, no_authorized_landing_attempt
+
+        with patch("app.doi_downloader.fetch_serials_solutions_candidates", return_value=[]):
+            candidates = doi_landing_candidates(
+                "10.1109/ted.2023.3268249",
+                {"publisher": "Institute of Electrical and Electronics Engineers (IEEE)"},
+            )
+
+        self.assertEqual(candidates, [])
+        attempt = no_authorized_landing_attempt(
+            "10.1109/ted.2023.3268249",
+            {"publisher": "Institute of Electrical and Electronics Engineers (IEEE)"},
+        )
+        self.assertEqual(attempt.status, "skipped_not_authorized")
+        self.assertIn("不在筑波大学授权数据库列表", attempt.failure_reason or "")
+
+    def test_doi_landing_candidates_keep_open_access_even_when_publisher_not_authorized(self) -> None:
+        from app.doi_downloader import doi_landing_candidates
+
+        with patch(
+            "app.doi_downloader.fetch_serials_solutions_candidates",
+            return_value=[
+                {
+                    "href": "https://hal.science/hal-04296517/file/FINAL%20VERSION.pdf",
+                    "text": "オープンアクセスバージョンを入手 file",
+                    "source": "hal_api",
+                    "priority": 14,
+                    "publisher_domain": "hal.science",
+                }
+            ],
+        ):
+            candidates = doi_landing_candidates(
+                "10.1109/ted.2023.3321277",
+                {"publisher": "Institute of Electrical and Electronics Engineers (IEEE)"},
+            )
+
+        self.assertEqual(candidates[0]["source"], "hal_api")
+        self.assertTrue(candidates[0]["policy"]["open_access"])
+        self.assertEqual([item["source"] for item in candidates], ["hal_api"])
+
     def test_access_denied_item_continues_with_diagnostics(self) -> None:
         from app.doi_downloader import DownloadAttempt, run_doi_download_job
 

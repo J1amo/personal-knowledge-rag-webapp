@@ -30,6 +30,8 @@ from app.doi_downloader import (  # noqa: E402
     _pdf_links_from_page,
     _reason_with_evidence,
     _save_failure_artifacts,
+    doi_landing_candidates,
+    no_authorized_landing_attempt,
     parse_doi_list,
     publisher_domain,
     run_doi_download_job,
@@ -204,18 +206,26 @@ class ChromeHandoffDownloadSession:
         except Exception:
             return None, "", None
 
-    def download(self, doi: str, settings: Any, metadata: dict[str, Any], artifacts_dir: Path) -> DownloadAttempt:
+    def _download_from_target(
+        self,
+        doi: str,
+        settings: Any,
+        metadata: dict[str, Any],
+        artifacts_dir: Path,
+        candidate: dict[str, Any],
+    ) -> DownloadAttempt:
         assert self.context is not None
         page = self.page or self.context.new_page()
         landing_url = None
         try:
-            target_url = f"https://doi.org/{doi}"
+            target_url = str(candidate.get("href") or f"https://doi.org/{doi}")
             page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(max(DEFAULT_PAGE_WAIT_MIN, min(DEFAULT_PAGE_WAIT_MAX, 1.0)))
             landing_url = page.url
             domain = publisher_domain(landing_url)
             state, reason, diagnostics = _classify_access_block_detail(None, landing_url, self._body_text(page))
             state, reason, diagnostics = self._wait_for_manual_clearance(page, state, reason, diagnostics, settings)
+            diagnostics = {**diagnostics, "landing_candidate": candidate}
             if state:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
                 return DownloadAttempt(
@@ -317,6 +327,22 @@ class ChromeHandoffDownloadSession:
             )
         finally:
             pass
+
+    def download(self, doi: str, settings: Any, metadata: dict[str, Any], artifacts_dir: Path) -> DownloadAttempt:
+        last_attempt: DownloadAttempt | None = None
+        candidates = doi_landing_candidates(doi, metadata)
+        if not candidates:
+            return no_authorized_landing_attempt(doi, metadata)
+        for candidate in candidates:
+            attempt = self._download_from_target(doi, settings, metadata, artifacts_dir, candidate)
+            if attempt.status == "downloaded":
+                return attempt
+            last_attempt = attempt
+            if attempt.status in {"needs_login", "blocked_by_captcha", "blocked_by_rate_limit"}:
+                return attempt
+        if last_attempt:
+            return last_attempt
+        return DownloadAttempt("failed", None, None, None, None, "No DOI landing candidate found")
 
 
 def _extract_pdf_bytes(body: bytes) -> bytes | None:

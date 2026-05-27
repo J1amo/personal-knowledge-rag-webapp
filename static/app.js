@@ -92,6 +92,7 @@ const statusLabel = {
   failed: "失败",
   downloaded: "已下载",
   skipped_existing: "已存在",
+  skipped_not_authorized: "不在授权清单",
   blocked_by_rate_limit: "限流阻止",
   blocked_by_access: "访问受限",
   blocked_by_captcha: "验证码/安全验证",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import shutil
 import time
 import uuid
@@ -10,6 +11,7 @@ import urllib.parse
 import urllib.request
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
+from html.parser import HTMLParser
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
@@ -34,6 +36,8 @@ MAX_MANUAL_LOGIN_TIMEOUT_SECONDS = 3600
 PROFILE_DIR = config.CACHE_DIR / "browser_profiles" / "doi_downloader"
 LOG_DIR = config.OUTPUT_DIR / "doi_download_logs"
 SNAPSHOT_DIR = LOG_DIR / "snapshots"
+SERIALS_SOLUTIONS_BASE_URL = "https://jn2xs2wb8u.search.serialssolutions.com/"
+SERIALS_SOLUTIONS_LIB_HASH = "JN2XS2WB8U"
 
 STOP_BATCH_STATUSES = {
     "needs_login",
@@ -64,6 +68,12 @@ CAPTCHA_TERMS = (
     "ray id",
     "security verification",
     "security check",
+    "making sure you're not a bot",
+    "making sure you&#39;re not a bot",
+    "not a bot",
+    "bot check",
+    "anubis",
+    "proof-of-work",
     "checking your browser",
     "checking if the site connection is secure",
     "validate.perfdrive.com",
@@ -72,6 +82,145 @@ CAPTCHA_TERMS = (
     "正在验证",
     "安全服务防护恶意自动程序",
     "验证您不是自动程序",
+)
+LINK_RESOLVER_FULLTEXT_TERMS = ("フルテキスト", "full text")
+LINK_RESOLVER_OPEN_ACCESS_TERMS = ("オープンアクセス", "open access")
+LINK_RESOLVER_SKIP_LABEL_TERMS = (
+    "refworks",
+    "ulrichs",
+    "書誌情報",
+    "ジャーナルを見る",
+    "journal",
+    "opac",
+    "文献複写",
+    "e-dds",
+)
+LINK_RESOLVER_PUBLIC_HOSTS = (
+    "hal.science",
+    "laas.hal.science",
+    "ncbi.nlm.nih.gov",
+    "www.ncbi.nlm.nih.gov",
+    "pmc.ncbi.nlm.nih.gov",
+    "zenodo.org",
+)
+SCHOOL_AUTHORIZED_PLATFORM_RULES: tuple[dict[str, Any], ...] = (
+    {
+        "name": "ACM Digital Library Open Access",
+        "hosts": ("dl.acm.org",),
+        "metadata_terms": ("association for computing machinery", "acm"),
+        "open_access_only": True,
+    },
+    {
+        "name": "AIP Journals Complete",
+        "hosts": ("pubs.aip.org", "aip.scitation.org"),
+        "metadata_terms": ("aip publishing", "american institute of physics"),
+        "campus_only": True,
+    },
+    {
+        "name": "American Chemical Society Journals",
+        "hosts": ("pubs.acs.org",),
+        "metadata_terms": ("american chemical society", "acs"),
+    },
+    {
+        "name": "American Physical Society Journals",
+        "hosts": ("journals.aps.org", "link.aps.org"),
+        "metadata_terms": ("american physical society",),
+    },
+    {
+        "name": "Cambridge Journals: 2026 Full Collection",
+        "hosts": ("cambridge.org",),
+        "metadata_terms": ("cambridge university press",),
+    },
+    {
+        "name": "Elsevier ScienceDirect Journals",
+        "hosts": ("sciencedirect.com", "www.sciencedirect.com"),
+        "metadata_terms": ("elsevier",),
+    },
+    {
+        "name": "HighWire Press",
+        "hosts": ("highwire.org", "highwirepress.com"),
+        "metadata_terms": ("highwire",),
+    },
+    {
+        "name": "IEEE Computer Society Digital Library",
+        "hosts": ("computer.org", "csdl.computer.org"),
+        "metadata_terms": ("ieee computer society",),
+    },
+    {
+        "name": "IOPscience platform",
+        "hosts": ("iopscience.iop.org",),
+        "metadata_terms": ("iop publishing", "institute of physics"),
+    },
+    {
+        "name": "J-STAGE",
+        "hosts": ("jstage.jst.go.jp",),
+        "metadata_terms": ("j-stage", "japan science and technology agency"),
+        "open_access_only": True,
+    },
+    {
+        "name": "Nature Journals Online",
+        "hosts": ("nature.com", "www.nature.com"),
+        "metadata_terms": ("springer nature", "nature portfolio"),
+    },
+    {
+        "name": "Oxford Journals Full Collection - JUSTICE",
+        "hosts": ("academic.oup.com",),
+        "metadata_terms": ("oxford university press",),
+    },
+    {
+        "name": "ProQuest Central Premium",
+        "hosts": ("proquest.com", "www.proquest.com", "search.proquest.com"),
+        "metadata_terms": ("proquest",),
+    },
+    {
+        "name": "PubMed Central",
+        "hosts": ("ncbi.nlm.nih.gov", "www.ncbi.nlm.nih.gov", "pmc.ncbi.nlm.nih.gov"),
+        "metadata_terms": ("pubmed central",),
+        "open_access": True,
+    },
+    {
+        "name": "Royal Society of Chemistry",
+        "hosts": ("pubs.rsc.org",),
+        "metadata_terms": ("royal society of chemistry", "rsc"),
+        "campus_only": True,
+    },
+    {
+        "name": "SAGE Journals",
+        "hosts": ("journals.sagepub.com",),
+        "metadata_terms": ("sage publications", "sage"),
+        "campus_only": True,
+    },
+    {
+        "name": "Science Magazine",
+        "hosts": ("science.org", "www.science.org"),
+        "metadata_terms": ("american association for the advancement of science",),
+    },
+    {
+        "name": "ScienceDirect Freedom Collection",
+        "hosts": ("sciencedirect.com", "www.sciencedirect.com"),
+        "metadata_terms": ("elsevier",),
+    },
+    {
+        "name": "SCOAP3 Journals",
+        "hosts": ("scoap3.org",),
+        "metadata_terms": ("scoap3",),
+        "open_access": True,
+    },
+    {
+        "name": "Springer Online Journals - JUSTICE",
+        "hosts": ("link.springer.com", "springer.com"),
+        "metadata_terms": ("springer",),
+    },
+    {
+        "name": "Taylor & Francis Online",
+        "hosts": ("tandfonline.com", "www.tandfonline.com"),
+        "metadata_terms": ("taylor & francis", "taylor and francis"),
+    },
+    {
+        "name": "Wiley Online Library Database Model 2026",
+        "hosts": ("onlinelibrary.wiley.com",),
+        "metadata_terms": ("wiley",),
+    },
 )
 RATE_LIMIT_TERMS = ("too many requests", "rate limit", "suspicious activity", "unusual traffic")
 LOGIN_TERMS = (
@@ -126,6 +275,35 @@ class DownloadAttempt:
     screenshot_path: str | None = None
     html_snapshot_path: str | None = None
     diagnostics: dict[str, Any] | None = None
+
+
+class _AnchorCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.anchors: list[dict[str, str]] = []
+        self._current_href: str | None = None
+        self._text_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "a":
+            return
+        attr_map = {key.lower(): value or "" for key, value in attrs}
+        href = attr_map.get("href")
+        if href:
+            self._current_href = href
+            self._text_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current_href is not None:
+            self._text_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() != "a" or self._current_href is None:
+            return
+        text = re.sub(r"\s+", " ", " ".join(self._text_parts)).strip()
+        self.anchors.append({"href": self._current_href, "text": text})
+        self._current_href = None
+        self._text_parts = []
 
 
 def default_out_dir() -> Path:
@@ -231,6 +409,11 @@ def doi_downloader_status() -> dict[str, Any]:
             "manual_access_wait_statuses": sorted(MANUAL_ACCESS_WAIT_STATUSES),
             "manual_login_timeout_seconds": DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS,
             "max_manual_login_timeout_seconds": MAX_MANUAL_LOGIN_TIMEOUT_SECONDS,
+            "licensed_platform_policy": "try Tsukuba-authorized platforms or open-access resolver candidates only",
+            "authorized_platforms": [str(rule["name"]) for rule in SCHOOL_AUTHORIZED_PLATFORM_RULES],
+            "campus_only_platforms": [
+                str(rule["name"]) for rule in SCHOOL_AUTHORIZED_PLATFORM_RULES if rule.get("campus_only")
+            ],
         },
         "setup_hint": (
             "Install with: python -m pip install playwright && python -m playwright install chromium"
@@ -305,6 +488,345 @@ def publisher_domain(url: str | None) -> str | None:
         return None
     host = urllib.parse.urlparse(url).netloc.lower()
     return host[4:] if host.startswith("www.") else host
+
+
+def _proxy_target_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    parsed = urllib.parse.urlparse(url)
+    host = publisher_domain(url) or ""
+    if host == "tsukuba.idm.oclc.org" and parsed.path.rstrip("/").endswith("/login"):
+        target = urllib.parse.parse_qs(parsed.query).get("url", [""])[0]
+        return target or None
+    return None
+
+
+def _lower_terms(*values: Any) -> str:
+    return " ".join(str(value or "").lower() for value in values)
+
+
+def _platform_match_by_host(host: str | None) -> dict[str, Any] | None:
+    if not host:
+        return None
+    lowered = host.lower()
+    for rule in SCHOOL_AUTHORIZED_PLATFORM_RULES:
+        for candidate_host in rule.get("hosts", ()):
+            if lowered == candidate_host or lowered.endswith("." + candidate_host):
+                return rule
+    return None
+
+
+def _platform_match_by_text(text: str) -> dict[str, Any] | None:
+    haystack = text.lower()
+    for rule in SCHOOL_AUTHORIZED_PLATFORM_RULES:
+        if any(term in haystack for term in rule.get("metadata_terms", ())):
+            return rule
+    return None
+
+
+def authorized_platform_for_url(url: str | None) -> dict[str, Any] | None:
+    platform = _platform_match_by_host(publisher_domain(url))
+    if platform:
+        return platform
+    return _platform_match_by_host(publisher_domain(_proxy_target_url(url)))
+
+
+def authorized_platform_for_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not metadata:
+        return None
+    return _platform_match_by_text(
+        _lower_terms(
+            metadata.get("publisher"),
+            metadata.get("journal"),
+            metadata.get("container-title"),
+            metadata.get("title"),
+        )
+    )
+
+
+def _platform_payload(platform: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not platform:
+        return None
+    return {
+        "name": platform.get("name"),
+        "campus_only": bool(platform.get("campus_only")),
+        "open_access": bool(platform.get("open_access")),
+        "open_access_only": bool(platform.get("open_access_only")),
+    }
+
+
+def _is_open_access_candidate(candidate: dict[str, Any]) -> bool:
+    host = publisher_domain(candidate.get("href")) or ""
+    label = str(candidate.get("text") or "").lower()
+    source = str(candidate.get("source") or "").lower()
+    return (
+        _is_public_fulltext_host(host)
+        or source in {"hal_api"}
+        or any(term in label for term in ("open access", "オープンアクセス", "pubmed central"))
+    )
+
+
+def _candidate_policy(candidate: dict[str, Any], metadata: dict[str, Any] | None) -> dict[str, Any]:
+    url_platform = authorized_platform_for_url(str(candidate.get("href") or ""))
+    metadata_platform = authorized_platform_for_metadata(metadata)
+    platform = url_platform or metadata_platform
+    open_access = _is_open_access_candidate(candidate)
+    allowed = bool(open_access or platform)
+    reason = None
+    if not allowed:
+        reason = "平台不在筑波大学授权数据库列表，且没有开放获取入口"
+    return {
+        "allowed": allowed,
+        "open_access": open_access,
+        "platform": _platform_payload(platform),
+        "reason": reason,
+    }
+
+
+def _direct_doi_candidate_policy(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    platform = authorized_platform_for_metadata(metadata)
+    allowed = bool(platform)
+    return {
+        "allowed": allowed,
+        "open_access": False,
+        "platform": _platform_payload(platform),
+        "reason": None if allowed else "Crossref 出版方不在筑波大学授权数据库列表",
+    }
+
+
+def _annotate_candidate_policy(candidate: dict[str, Any], metadata: dict[str, Any] | None) -> dict[str, Any]:
+    policy = _candidate_policy(candidate, metadata)
+    return {**candidate, "policy": policy, "authorized_platform": policy.get("platform")}
+
+
+def serials_solutions_lookup_url(doi: str, language: str = "ja") -> str:
+    query = urllib.parse.urlencode(
+        {
+            "SS_LibHash": SERIALS_SOLUTIONS_LIB_HASH,
+            "genre": "article",
+            "paramdict": language,
+            "sid": "sersol:uniqueIDQuery",
+            "id": doi,
+        }
+    )
+    return SERIALS_SOLUTIONS_BASE_URL + "?" + query
+
+
+def _decode_serials_href(href: str) -> str:
+    url = urllib.parse.urljoin(SERIALS_SOLUTIONS_BASE_URL, href)
+    parsed = urllib.parse.urlparse(url)
+    if parsed.path.endswith("/log") or parsed.path.endswith("/log/"):
+        target = urllib.parse.parse_qs(parsed.query).get("U", [""])[0]
+        if target:
+            return target
+    return url
+
+
+def _is_public_fulltext_host(host: str) -> bool:
+    return host in LINK_RESOLVER_PUBLIC_HOSTS or host.endswith(".hal.science")
+
+
+def _prefer_direct_public_url(url: str) -> str:
+    target = _proxy_target_url(url)
+    if target and _is_public_fulltext_host(publisher_domain(target) or ""):
+        return target
+    return url
+
+
+def _link_resolver_candidate_priority(text: str, url: str) -> int | None:
+    label = text.lower()
+    lowered_url = url.lower()
+    host = publisher_domain(url) or ""
+    if any(term in label for term in LINK_RESOLVER_SKIP_LABEL_TERMS):
+        return None
+    if any(term in lowered_url for term in ("refworks.com", "ulrichsweb", "opac", "copy_requests", "ndlsearch")):
+        return None
+    if "ss_page=refiner" in lowered_url:
+        return None
+    public_host = _is_public_fulltext_host(host)
+    if any(term in text for term in LINK_RESOLVER_FULLTEXT_TERMS) or any(
+        term in label for term in LINK_RESOLVER_FULLTEXT_TERMS
+    ):
+        return 5 if public_host else 10
+    if any(term in text for term in LINK_RESOLVER_OPEN_ACCESS_TERMS) or any(
+        term in label for term in LINK_RESOLVER_OPEN_ACCESS_TERMS
+    ):
+        return 15 if public_host else 20
+    if public_host:
+        return 30
+    return None
+
+
+def parse_serials_solutions_candidates(html_text: str) -> list[dict[str, Any]]:
+    collector = _AnchorCollector()
+    collector.feed(html_text or "")
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for anchor in collector.anchors:
+        url = _prefer_direct_public_url(_decode_serials_href(anchor["href"]))
+        priority = _link_resolver_candidate_priority(anchor.get("text", ""), url)
+        if priority is None or url in seen:
+            continue
+        seen.add(url)
+        candidates.append(
+            {
+                "href": url,
+                "text": anchor.get("text", ""),
+                "source": "serials_solutions",
+                "priority": priority,
+                "publisher_domain": publisher_domain(url),
+            }
+        )
+    return sorted(candidates, key=lambda item: item["priority"])
+
+
+def _hal_id_from_url(url: str) -> str | None:
+    match = re.search(r"\bhal-\d+", url.lower())
+    return match.group(0) if match else None
+
+
+def hal_api_lookup_url(hal_url: str) -> str | None:
+    hal_id = _hal_id_from_url(hal_url)
+    if not hal_id:
+        return None
+    return "https://api.archives-ouvertes.fr/search/?" + urllib.parse.urlencode(
+        {"q": f"halId_s:{hal_id}", "fl": "files_s,uri_s,title_s", "wt": "json"}
+    )
+
+
+def parse_hal_api_file_candidates(candidate: dict[str, Any], json_text: str) -> list[dict[str, Any]]:
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError:
+        return []
+    docs = data.get("response", {}).get("docs", [])
+    if not docs:
+        return []
+    files = docs[0].get("files_s") or []
+    results: list[dict[str, Any]] = []
+    base_priority = int(candidate.get("priority") or 20)
+    lookup_url = hal_api_lookup_url(str(candidate.get("href") or ""))
+    for href in files:
+        if not isinstance(href, str):
+            continue
+        lowered = href.lower()
+        if ".pdf" not in lowered:
+            continue
+        results.append(
+            {
+                "href": href,
+                "text": f"{candidate.get('text') or 'HAL'} file",
+                "source": "hal_api",
+                "priority": max(1, base_priority - 1),
+                "publisher_domain": publisher_domain(href),
+                "lookup_url": lookup_url,
+            }
+        )
+    return results
+
+
+def fetch_hal_file_candidates(candidate: dict[str, Any], timeout: int = 15) -> list[dict[str, Any]]:
+    lookup_url = hal_api_lookup_url(str(candidate.get("href") or ""))
+    if not lookup_url:
+        return []
+    request = urllib.request.Request(
+        lookup_url,
+        headers={"User-Agent": "personal-research-os-doi-downloader/0.1"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec - public repository metadata API
+            return parse_hal_api_file_candidates(candidate, response.read().decode("utf-8", "replace"))
+    except Exception:
+        return []
+
+
+def _expand_public_repository_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        additions = []
+        if _hal_id_from_url(str(candidate.get("href") or "")):
+            additions = fetch_hal_file_candidates(candidate)
+        for item in [*additions, candidate]:
+            href = str(item.get("href") or "")
+            if not href or href in seen:
+                continue
+            seen.add(href)
+            expanded.append(item)
+    return sorted(expanded, key=lambda item: item["priority"])
+
+
+def fetch_serials_solutions_candidates(doi: str, timeout: int = 25) -> list[dict[str, Any]]:
+    url = serials_solutions_lookup_url(doi)
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "personal-research-os-doi-downloader/0.1"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec - configured library link resolver
+            html_text = response.read().decode("utf-8", "replace")
+    except Exception:
+        return []
+    candidates = parse_serials_solutions_candidates(html_text)
+    for candidate in candidates:
+        candidate["lookup_url"] = url
+    return _expand_public_repository_candidates(candidates)
+
+
+def no_authorized_landing_attempt(doi: str, metadata: dict[str, Any] | None = None) -> DownloadAttempt:
+    platform = authorized_platform_for_metadata(metadata)
+    publisher = str((metadata or {}).get("publisher") or "unknown")
+    journal = str((metadata or {}).get("journal") or "")
+    diagnostics = {
+        "classification": "skipped_not_authorized",
+        "publisher": publisher,
+        "journal": journal,
+        "authorized_platform": _platform_payload(platform),
+        "licensed_platform_policy": "try Tsukuba-authorized platforms or open-access resolver candidates only",
+    }
+    reason = (
+        "平台不在筑波大学授权数据库列表，且 Serials Solutions 没有给出开放获取/授权全文入口"
+        f" (publisher: {publisher})"
+    )
+    return DownloadAttempt(
+        "skipped_not_authorized",
+        f"https://doi.org/{doi}",
+        "doi.org",
+        None,
+        None,
+        reason,
+        None,
+        None,
+        diagnostics,
+    )
+
+
+def doi_landing_candidates(
+    doi: str, metadata: dict[str, Any] | None = None, *, include_direct: bool = True
+) -> list[dict[str, Any]]:
+    candidates = [
+        annotated
+        for candidate in fetch_serials_solutions_candidates(doi)
+        for annotated in [_annotate_candidate_policy(candidate, metadata)]
+        if annotated["policy"]["allowed"]
+    ]
+    if include_direct:
+        direct_policy = _direct_doi_candidate_policy(metadata)
+        if direct_policy["allowed"]:
+            direct = {
+                "href": f"https://doi.org/{doi}",
+                "text": "DOI direct",
+                "source": "doi",
+                "priority": 100,
+                "publisher_domain": "doi.org",
+                "policy": direct_policy,
+                "authorized_platform": direct_policy.get("platform"),
+            }
+        else:
+            direct = None
+        if direct and all(candidate.get("href") != direct["href"] for candidate in candidates):
+            candidates.append(direct)
+    return candidates
 
 
 def fetch_crossref_metadata(doi: str, timeout: int = 8) -> dict[str, Any]:
@@ -672,12 +1194,17 @@ class PlaywrightDownloadSession:
         except Exception:
             return ""
 
-    def download(self, doi: str, metadata: dict[str, Any], artifacts_dir: Path) -> DownloadAttempt:
-        assert self.context is not None
-        page = self.context.new_page()
+    def _download_from_target(
+        self,
+        page: Any,
+        doi: str,
+        metadata: dict[str, Any],
+        artifacts_dir: Path,
+        candidate: dict[str, Any],
+    ) -> DownloadAttempt:
         landing_url = None
+        target_url = str(candidate.get("href") or f"https://doi.org/{doi}")
         try:
-            target_url = f"https://doi.org/{doi}"
             response = page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             self._jitter()
             landing_url = page.url
@@ -688,6 +1215,7 @@ class PlaywrightDownloadSession:
                 body = response.body()
                 return DownloadAttempt("downloaded", landing_url, domain, landing_url, body)
             state, reason, diagnostics = _classify_access_block_detail(status_code, landing_url, self._body_text(page))
+            diagnostics = {**diagnostics, "landing_candidate": candidate}
             if should_wait_for_manual_access(state, self.settings):
                 deadline = time.monotonic() + self.settings.manual_login_timeout_seconds
                 waited_seconds = 0.0
@@ -701,6 +1229,7 @@ class PlaywrightDownloadSession:
                         "manual_access_waited": True,
                         "manual_access_wait_seconds": round(waited_seconds, 1),
                         "manual_access_wait_statuses": sorted(MANUAL_ACCESS_WAIT_STATUSES),
+                        "landing_candidate": candidate,
                     }
                     if state not in MANUAL_ACCESS_WAIT_STATUSES:
                         break
@@ -762,6 +1291,25 @@ class PlaywrightDownloadSession:
         except Exception as exc:
             screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
             return DownloadAttempt("failed", landing_url or page.url, publisher_domain(landing_url or page.url), None, None, str(exc), screenshot, html)
+
+    def download(self, doi: str, metadata: dict[str, Any], artifacts_dir: Path) -> DownloadAttempt:
+        assert self.context is not None
+        page = self.context.new_page()
+        last_attempt: DownloadAttempt | None = None
+        try:
+            candidates = doi_landing_candidates(doi, metadata)
+            if not candidates:
+                return no_authorized_landing_attempt(doi, metadata)
+            for candidate in candidates:
+                attempt = self._download_from_target(page, doi, metadata, artifacts_dir, candidate)
+                if attempt.status == "downloaded":
+                    return attempt
+                last_attempt = attempt
+                if attempt.status in STOP_BATCH_STATUSES:
+                    return attempt
+            if last_attempt:
+                return last_attempt
+            return DownloadAttempt("failed", None, None, None, None, "No DOI landing candidate found")
         finally:
             try:
                 page.close()
