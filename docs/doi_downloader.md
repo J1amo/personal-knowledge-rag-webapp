@@ -81,7 +81,7 @@ This starts a separate real Chrome handoff session. It runs in the background by
 
 The web UI enables DeepSeek page advice by default, but it only makes an API call when `DEEPSEEK_API_KEY` is configured in `.env` or the service environment. CLI usage enables the same default unless `--no-deepseek` is passed. The advisor receives page title, visible text summary, and link candidates only; cookies, account data, and PDF files are not sent. It cannot bypass CAPTCHA, login, paywalls, or access controls.
 
-The Codex in-app browser is a Codex-side debugging surface, not a callable backend inside this local Web App yet. Until a dedicated backend is implemented, the Web UI uses background Playwright by default and visible Playwright only for explicit debug/manual-wait runs.
+The Codex in-app browser is a Codex-side debugging surface, not a callable backend inside this local Web App yet. It also does not expose supported file-download events for DOI PDFs, so the app must keep automatic downloads on the background Playwright backend. Codex can still use the in-app browser for manual navigation or diagnosis, but the Web UI uses background Playwright by default and visible Playwright only for explicit debug/manual-wait runs.
 
 Fast mode, only for small open-access or explicitly confirmed batches:
 

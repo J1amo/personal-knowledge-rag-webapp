@@ -11,7 +11,6 @@ import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
-from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
 from importlib.util import find_spec
@@ -558,20 +557,29 @@ def doi_downloader_status() -> dict[str, Any]:
         "profile_exists": profile.exists(),
         "access_session": {
             "mode": "playwright_persistent_context",
+            "default_browser_backend": "background_playwright",
             "profile_dir": str(profile),
             "profile_exists": profile.exists(),
             "headless_by_default": True,
             "visible_manual_wait_requires_headed": True,
+            "codex_in_app_browser": {
+                "app_backend_callable": False,
+                "downloads_supported": False,
+                "role": "codex_agent_manual_navigation_only",
+            },
         },
         "default_out_dir": str(default_out_dir()),
         "log_dir": str(LOG_DIR),
         "default_policy": {
             "concurrency": 1,
+            "browser_concurrency": 1,
             "batch_mode": "process_all_deduped_dois",
             "default_batch_size": DEFAULT_MAX_ITEMS,
             "absolute_max_batch_size": ABSOLUTE_MAX_ITEMS,
             "page_action_wait_seconds": [DEFAULT_PAGE_WAIT_MIN, DEFAULT_PAGE_WAIT_MAX],
             "article_delay_seconds": [DEFAULT_ARTICLE_DELAY_MIN, DEFAULT_ARTICLE_DELAY_MAX],
+            "article_delay_scope": "same_source_browser_access_only",
+            "preflight_without_browser": True,
             "fast_mode_default": False,
             "fast_mode_article_delay_seconds": [FAST_ARTICLE_DELAY_MIN, FAST_ARTICLE_DELAY_MAX],
             "fast_mode_max_batch_size": FAST_MAX_ITEMS,
@@ -1981,11 +1989,55 @@ def _download_public_pdf_with_curl(
     return None
 
 
+def _candidate_source_group(candidate: dict[str, Any], target_url: str | None = None) -> str | None:
+    url = target_url or str(candidate.get("href") or "")
+    target = _proxy_target_url(url) or url
+    target_domain = str(candidate.get("target_domain") or "").strip().lower()
+    domain = target_domain or publisher_domain(target)
+    if domain:
+        return domain
+    platform = candidate.get("authorized_platform") or candidate.get("policy", {}).get("platform") or {}
+    if isinstance(platform, dict) and platform.get("name"):
+        return str(platform["name"]).strip().lower()
+    source = str(candidate.get("source") or "").strip().lower()
+    return source or None
+
+
+def _preflight_without_browser(doi: str, metadata: dict[str, Any]) -> tuple[DownloadAttempt | None, list[dict[str, Any]]]:
+    candidates = doi_landing_candidates(doi, metadata)
+    if not candidates:
+        return no_authorized_landing_attempt(doi, metadata), []
+
+    last_attempt: DownloadAttempt | None = None
+    browser_candidates: list[dict[str, Any]] = []
+    for candidate in candidates:
+        preflight_attempt = preflight_candidate_block_attempt(candidate)
+        if preflight_attempt:
+            last_attempt = preflight_attempt
+            continue
+        target_url = str(candidate.get("href") or f"https://doi.org/{doi}")
+        if _is_probable_public_pdf_or_repository_url(target_url):
+            attempt = _download_public_pdf_over_http(target_url, candidate)
+            if attempt.status == "downloaded":
+                return attempt, []
+            last_attempt = attempt
+            continue
+        browser_candidates.append(candidate)
+
+    if browser_candidates:
+        return None, browser_candidates
+    if last_attempt:
+        return last_attempt, []
+    return DownloadAttempt("failed", None, None, None, None, "No DOI landing candidate found"), []
+
+
 class PlaywrightDownloadSession:
-    def __init__(self, settings: DoiDownloadSettings):
+    def __init__(self, settings: DoiDownloadSettings, sleeper: Callable[[float], None] | None = None):
         self.settings = settings
+        self.sleeper = sleeper
         self.playwright = None
         self.context = None
+        self._last_source_access_at: dict[str, float] = {}
 
     def __enter__(self) -> "PlaywrightDownloadSession":
         from playwright.sync_api import sync_playwright  # type: ignore
@@ -2006,8 +2058,28 @@ class PlaywrightDownloadSession:
         if self.playwright:
             self.playwright.stop()
 
+    def _sleep(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        if self.sleeper:
+            self.sleeper(seconds)
+        else:
+            time.sleep(seconds)
+
     def _jitter(self) -> None:
-        time.sleep(random.uniform(self.settings.page_action_wait_min, self.settings.page_action_wait_max))
+        self._sleep(random.uniform(self.settings.page_action_wait_min, self.settings.page_action_wait_max))
+
+    def _throttle_source_group(self, candidate: dict[str, Any], target_url: str) -> None:
+        source_group = _candidate_source_group(candidate, target_url)
+        if not source_group:
+            return
+        previous = self._last_source_access_at.get(source_group)
+        now = time.monotonic()
+        if previous is not None:
+            interval = random.uniform(self.settings.article_delay_min, self.settings.article_delay_max)
+            self._sleep(max(0.0, interval - (now - previous)))
+            now = time.monotonic()
+        self._last_source_access_at[source_group] = now
 
     def _body_text(self, page: Any) -> str:
         try:
@@ -2028,6 +2100,7 @@ class PlaywrightDownloadSession:
         try:
             if _is_probable_public_pdf_or_repository_url(target_url):
                 return _download_public_pdf_over_http(target_url, candidate)
+            self._throttle_source_group(candidate, target_url)
             response = page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             self._jitter()
             landing_url = page.url
@@ -2142,12 +2215,18 @@ class PlaywrightDownloadSession:
             screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
             return DownloadAttempt("failed", landing_url or page.url, publisher_domain(landing_url or page.url), None, None, str(exc), screenshot, html)
 
-    def download(self, doi: str, metadata: dict[str, Any], artifacts_dir: Path) -> DownloadAttempt:
+    def download(
+        self,
+        doi: str,
+        metadata: dict[str, Any],
+        artifacts_dir: Path,
+        candidates: list[dict[str, Any]] | None = None,
+    ) -> DownloadAttempt:
         assert self.context is not None
         page = self.context.new_page()
         last_attempt: DownloadAttempt | None = None
         try:
-            candidates = doi_landing_candidates(doi, metadata)
+            candidates = candidates if candidates is not None else doi_landing_candidates(doi, metadata)
             if not candidates:
                 return no_authorized_landing_attempt(doi, metadata)
             for candidate in candidates:
@@ -2185,15 +2264,6 @@ def _ingest_downloaded_pdf(path: str, doi: str, metadata: dict[str, Any], rebuil
 
         payload["rebuild"] = rebuild_indexes(source_id=result.source_id)
     return payload
-
-
-def _sleep_article(settings: DoiDownloadSettings, sleeper: Callable[[float], None] | None) -> float:
-    seconds = random.uniform(settings.article_delay_min, settings.article_delay_max)
-    if sleeper:
-        sleeper(seconds)
-    else:
-        time.sleep(seconds)
-    return seconds
 
 
 def _batch_count(total_items: int, batch_size: int) -> int:
@@ -2242,11 +2312,9 @@ def run_doi_download_job(
         _finish_job(job_id, "failed", summary, "No valid DOI supplied")
         return {"status": "failed", "job_id": job_id, "summary": summary, "items": []}
 
-    runner_context = nullcontext(browser_runner)
-    if browser_runner is None and find_spec("playwright") is not None:
-        runner_context = PlaywrightDownloadSession(resolved)
-
-    with runner_context as runner:
+    runner: Any = browser_runner
+    session: PlaywrightDownloadSession | None = None
+    try:
         for idx, doi in enumerate(all_dois, start=1):
             batch_index = (idx - 1) // batch_size + 1
             batch_item_index = (idx - 1) % batch_size + 1
@@ -2276,23 +2344,39 @@ def run_doi_download_job(
                 )
                 continue
 
-            if browser_runner is None and find_spec("playwright") is None:
-                reason = "Playwright is not installed; run python -m pip install playwright and python -m playwright install chromium"
-                _update_item(item_id, status="failed", failure_reason=reason)
-                items.append(
-                    {
-                        "id": item_id,
-                        "doi": doi,
-                        "status": "failed",
-                        "failure_reason": reason,
-                        "batch_index": batch_index,
-                        "batch_item_index": batch_item_index,
-                    }
-                )
-                continue
-
             _update_item(item_id, status="resolving")
-            attempt = runner.download(doi, metadata, artifacts_dir) if hasattr(runner, "download") else runner(doi, resolved, metadata, artifacts_dir)
+            browser_candidates: list[dict[str, Any]] | None = None
+            attempt: DownloadAttempt | None = None
+            if browser_runner is None:
+                attempt, browser_candidates = _preflight_without_browser(doi, metadata)
+
+            if attempt is None:
+                if browser_runner is None:
+                    if find_spec("playwright") is None:
+                        reason = (
+                            "Playwright is not installed; run python -m pip install playwright "
+                            "and python -m playwright install chromium"
+                        )
+                        _update_item(item_id, status="failed", failure_reason=reason)
+                        items.append(
+                            {
+                                "id": item_id,
+                                "doi": doi,
+                                "status": "failed",
+                                "failure_reason": reason,
+                                "batch_index": batch_index,
+                                "batch_item_index": batch_item_index,
+                            }
+                        )
+                        continue
+                    if session is None:
+                        session = PlaywrightDownloadSession(resolved, sleeper=sleeper)
+                        runner = session.__enter__()
+                attempt = (
+                    runner.download(doi, metadata, artifacts_dir, candidates=browser_candidates)
+                    if hasattr(runner, "download")
+                    else runner(doi, resolved, metadata, artifacts_dir)
+                )
             if attempt.status == "downloaded" and attempt.pdf_bytes:
                 try:
                     saved = save_pdf_and_metadata(
@@ -2380,8 +2464,9 @@ def run_doi_download_job(
                     stop_reason = attempt.failure_reason or attempt.status
                     break
 
-            if idx < len(all_dois) and not stop_reason:
-                _sleep_article(resolved, sleeper)
+    finally:
+        if session is not None:
+            session.__exit__(None, None, None)
 
     processed_count = len(items)
     for idx in range(processed_count + 1, len(all_dois) + 1):

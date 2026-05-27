@@ -91,6 +91,25 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(fast.article_delay_min, FAST_ARTICLE_DELAY_MIN)
         self.assertEqual(fast.article_delay_max, FAST_ARTICLE_DELAY_MAX)
 
+    def test_source_group_throttle_skips_different_sites(self) -> None:
+        from app.doi_downloader import DoiDownloadSettings, PlaywrightDownloadSession
+
+        sleeps: list[float] = []
+        session = PlaywrightDownloadSession(
+            DoiDownloadSettings(out_dir=str(self.root / "papers")),
+            sleeper=sleeps.append,
+        )
+        with patch("app.doi_downloader.random.uniform", return_value=10.0), patch(
+            "app.doi_downloader.time.monotonic",
+            side_effect=[100.0, 101.0, 102.0, 110.0],
+        ):
+            session._throttle_source_group({"href": "https://acs.test/article-1"}, "https://acs.test/article-1")
+            session._throttle_source_group({"href": "https://elsevier.test/article-1"}, "https://elsevier.test/article-1")
+            session._throttle_source_group({"href": "https://acs.test/article-2"}, "https://acs.test/article-2")
+
+        self.assertEqual(len(sleeps), 1)
+        self.assertAlmostEqual(sleeps[0], 8.0)
+
     def test_access_block_classification(self) -> None:
         from app.doi_downloader import classify_access_block
 
@@ -229,7 +248,7 @@ class DoiDownloaderTest(unittest.TestCase):
         sidecar.write_text(json.dumps(payload), encoding="utf-8")
         self.assertIsNone(find_existing_download("10.1234/test", out_dir))
 
-    def test_job_records_playwright_missing_without_network(self) -> None:
+    def test_unauthorized_preflight_does_not_require_playwright(self) -> None:
         from app.doi_downloader import run_doi_download_job
 
         with patch("app.doi_downloader.find_spec", return_value=None):
@@ -237,6 +256,32 @@ class DoiDownloaderTest(unittest.TestCase):
                 "10.1234/missing-playwright",
                 {"out_dir": str(self.root / "papers"), "max_items": 1},
                 metadata_fetcher=lambda doi: {"doi": doi, "title": "Missing Playwright"},
+                sleeper=lambda _seconds: None,
+            )
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["items"][0]["status"], "skipped_not_authorized")
+        self.assertNotIn("Playwright", result["items"][0]["failure_reason"])
+
+    def test_playwright_missing_is_recorded_only_when_browser_candidate_is_needed(self) -> None:
+        from app.doi_downloader import run_doi_download_job
+
+        candidates = [
+            {
+                "href": "https://publisher.test/article",
+                "text": "Full text",
+                "source": "serials_solutions",
+                "priority": 10,
+                "publisher_domain": "publisher.test",
+                "policy": {"allowed": True},
+            }
+        ]
+        with patch("app.doi_downloader.find_spec", return_value=None), patch(
+            "app.doi_downloader.doi_landing_candidates", return_value=candidates
+        ):
+            result = run_doi_download_job(
+                "10.1234/needs-browser",
+                {"out_dir": str(self.root / "papers"), "max_items": 1},
+                metadata_fetcher=lambda doi: {"doi": doi, "title": "Needs Browser"},
                 sleeper=lambda _seconds: None,
             )
         self.assertEqual(result["status"], "failed")
@@ -801,6 +846,9 @@ class DoiDownloaderTest(unittest.TestCase):
             doi_downloader_status()["access_session"]["mode"],
             "playwright_persistent_context",
         )
+        self.assertFalse(
+            doi_downloader_status()["access_session"]["codex_in_app_browser"]["downloads_supported"],
+        )
 
         def retry_runner(doi, _settings, _metadata, _artifacts_dir):
             return DownloadAttempt(
@@ -871,7 +919,7 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(result["summary"]["batch_count"], 3)
         self.assertEqual(result["summary"]["completed_batches"], 3)
         self.assertEqual([item["batch_index"] for item in result["items"]], [1, 1, 2, 2, 3])
-        self.assertEqual(len(sleeps), 4)
+        self.assertEqual(len(sleeps), 0)
 
 
 if __name__ == "__main__":
