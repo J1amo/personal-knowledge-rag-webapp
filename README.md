@@ -31,6 +31,7 @@ http://127.0.0.1:8765
 ./scripts/pkb.sh ingest /path/to/pdfs --topic "研究方向"
 ./scripts/pkb.sh ask "这个方向的核心问题是什么？"
 ./scripts/pkb.sh markdown "生成带证据的研究摘要" --type research_summary
+./scripts/pkb.sh chatgpt-packet "让 GPT-5.5 Pro 基于公开论文库形成研究方案"
 ```
 
 结果不准或流程异常时生成 Codex handoff：
@@ -150,6 +151,8 @@ db/knowledge.sqlite
 原始文件是最高级别证据，系统不会自动删除 raw files。`.gitignore` 已排除 `.env`、`data/raw/`、`db/`、`indexes/`、`cache/`、`backups/`。
 
 Markdown 输出默认写入 `outputs/`，该目录也被 `.gitignore` 排除，因为输出可能包含私有资料片段。
+
+ChatGPT 研究包默认写入 `outputs/chatgpt_packets/`，会生成一个可上传的 `.zip`、`paper_manifest.csv`、证据 Markdown、上传说明和 `chatgpt_prompt.md`。命令默认只包含 `domain='paper'` 且 `sensitivity='public'` 的论文证据，不会把原始 PDF 放进 zip；提示词会通过 macOS `pbcopy` 自动复制到剪贴板，可用 `--no-copy` 跳过。
 
 ## Research Workspace / Packs
 

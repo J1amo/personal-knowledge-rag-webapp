@@ -49,6 +49,7 @@ def workflow(_args: argparse.Namespace) -> int:
   ./scripts/pkb.sh ingest /path/to/pdfs --topic "研究方向"
   ./scripts/pkb.sh ask "这个方向的核心问题是什么？"
   ./scripts/pkb.sh markdown "生成带证据的研究摘要" --type research_summary
+  ./scripts/pkb.sh chatgpt-packet "让 GPT-5.5 Pro 基于公开论文库形成研究方案"
 
 只有研究方向：
   ./scripts/pkb.sh discover "研究方向" --keywords "关键词1,关键词2" --max-results 8
@@ -185,6 +186,40 @@ def markdown(args: argparse.Namespace) -> int:
     return 0
 
 
+def chatgpt_packet(args: argparse.Namespace) -> int:
+    from app.chatgpt_packet import DEFAULT_GOAL, generate_chatgpt_packet
+
+    result = generate_chatgpt_packet(
+        goal=args.goal or DEFAULT_GOAL,
+        retrieval_mode=args.retrieval_mode,
+        top_k=args.top_k,
+        output_dir=Path(args.output_dir).expanduser() if args.output_dir else None,
+        copy_prompt=not args.no_copy,
+    )
+    if args.json:
+        emit(result, as_json=True)
+    elif result.get("status") == "ready":
+        clipboard = result.get("clipboard") or {}
+        copy_line = (
+            "Prompt copied to clipboard."
+            if clipboard.get("copied")
+            else f"Prompt not copied: {clipboard.get('error') or clipboard.get('status')}"
+        )
+        emit(
+            "\n".join(
+                [
+                    f"ChatGPT packet ready: {result['zip_path']}",
+                    f"Prompt file: {result['prompt_path']}",
+                    copy_line,
+                    "Original PDFs are not included; upload/copy them manually if needed.",
+                ]
+            )
+        )
+    else:
+        emit(f"ChatGPT packet not generated: {result.get('reason') or 'unknown reason'}")
+    return 0 if result.get("status") == "ready" else 1
+
+
 def discover(args: argparse.Namespace) -> int:
     from app.literature_discovery import discover_literature
 
@@ -270,6 +305,15 @@ def build_parser() -> argparse.ArgumentParser:
     markdown_parser.add_argument("--llm-backend", default="gemma4")
     markdown_parser.add_argument("--json", action="store_true")
     markdown_parser.set_defaults(func=markdown)
+
+    packet_parser = sub.add_parser("chatgpt-packet", help="Generate a ChatGPT upload zip and copy its prompt")
+    packet_parser.add_argument("goal", nargs="?", help="Research goal for GPT-5.5 Pro")
+    packet_parser.add_argument("--retrieval-mode", default="strict_exhaustive")
+    packet_parser.add_argument("--top-k", type=int, default=40)
+    packet_parser.add_argument("--output-dir")
+    packet_parser.add_argument("--no-copy", action="store_true", help="Do not copy the prompt to the clipboard")
+    packet_parser.add_argument("--json", action="store_true")
+    packet_parser.set_defaults(func=chatgpt_packet)
 
     discover_parser = sub.add_parser("discover", help="Discover candidate papers from OpenAlex")
     discover_parser.add_argument("topic")

@@ -30,9 +30,12 @@ PKB_PYTHON=/path/to/python-with-pymupdf ./scripts/pkb.sh doctor
 ./scripts/pkb.sh ingest /path/to/pdfs --topic "研究方向"
 ./scripts/pkb.sh ask "这个方向的核心问题是什么？"
 ./scripts/pkb.sh markdown "生成带证据的研究摘要" --type research_summary
+./scripts/pkb.sh chatgpt-packet "让 GPT-5.5 Pro 基于公开论文库形成研究方案"
 ```
 
 默认保留原始 PDF，默认使用本地解析、本地索引和本地检索。私密资料不要外发 API。
+
+`chatgpt-packet` 会生成 `outputs/chatgpt_packets/*.zip`，里面包含公开论文 manifest、语料快照、证据 Markdown、上传说明和 ChatGPT 提示词；原始 PDF 不会被打包，按需由用户手动上传或复制。默认会把提示词复制到剪贴板，可用 `--no-copy` 跳过。
 
 ## 只有研究方向
 
