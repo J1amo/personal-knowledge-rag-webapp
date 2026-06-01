@@ -50,6 +50,7 @@ STOP_BATCH_STATUSES = {
     "blocked_by_rate_limit",
 }
 MANUAL_ACCESS_WAIT_STATUSES = {"needs_login", "blocked_by_access"}
+MANUAL_SECURITY_WAIT_STATUSES = {"blocked_by_captcha"}
 ACCESS_STOP_STATUSES = MANUAL_ACCESS_WAIT_STATUSES | {"blocked_by_captcha"}
 VERIFICATION_QUEUE_STATUSES = (
     "needs_login",
@@ -422,6 +423,7 @@ class DoiDownloadSettings:
     manual_login_timeout_seconds: int = DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS
     retry_limit: int = 1
     use_deepseek: bool = True
+    campus_session_mode: bool = False
 
 
 @dataclass
@@ -530,7 +532,11 @@ def resolve_settings(payload: dict[str, Any] | DoiDownloadSettings | None = None
                 payload.get("manual_login_timeout_seconds") or DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS
             ),
             use_deepseek=bool(payload.get("use_deepseek", True)),
+            campus_session_mode=bool(payload.get("campus_session_mode")),
         )
+    if settings.campus_session_mode:
+        settings.headed = True
+        settings.allow_manual_login = True
     if settings.fast_mode:
         settings.max_items = max(1, min(settings.max_items, FAST_MAX_ITEMS))
         settings.article_delay_min = FAST_ARTICLE_DELAY_MIN
@@ -584,8 +590,16 @@ def doi_downloader_status() -> dict[str, Any]:
             "fast_mode_article_delay_seconds": [FAST_ARTICLE_DELAY_MIN, FAST_ARTICLE_DELAY_MAX],
             "fast_mode_max_batch_size": FAST_MAX_ITEMS,
             "manual_access_wait_statuses": sorted(MANUAL_ACCESS_WAIT_STATUSES),
+            "manual_security_wait_statuses": sorted(MANUAL_SECURITY_WAIT_STATUSES),
+            "campus_session_mode": {
+                "default": False,
+                "requires_headed_browser": True,
+                "requires_user_completed_login_or_verification": True,
+                "retries_captcha_queue": True,
+            },
             "verification_queue_statuses": list(VERIFICATION_QUEUE_STATUSES),
             "verification_retry_statuses": list(VERIFICATION_RETRY_STATUSES),
+            "campus_session_retry_statuses": [*VERIFICATION_RETRY_STATUSES, "blocked_by_captcha"],
             "manual_login_timeout_seconds": DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS,
             "max_manual_login_timeout_seconds": MAX_MANUAL_LOGIN_TIMEOUT_SECONDS,
             "deepseek_default": True,
@@ -662,7 +676,15 @@ def classify_access_block(status_code: int | None, url: str | None, text: str | 
 
 
 def should_wait_for_manual_access(state: str | None, settings: DoiDownloadSettings) -> bool:
-    return bool(state in MANUAL_ACCESS_WAIT_STATUSES and settings.allow_manual_login and settings.headed)
+    if state in MANUAL_ACCESS_WAIT_STATUSES:
+        return bool(settings.allow_manual_login and settings.headed)
+    if state in MANUAL_SECURITY_WAIT_STATUSES:
+        return bool(settings.campus_session_mode and settings.allow_manual_login and settings.headed)
+    return False
+
+
+def campus_session_mode_enabled(settings: DoiDownloadSettings | None) -> bool:
+    return bool(settings and settings.campus_session_mode and settings.allow_manual_login and settings.headed)
 
 
 def apply_candidate_manual_wait_policy(
@@ -670,11 +692,21 @@ def apply_candidate_manual_wait_policy(
     reason: str | None,
     diagnostics: dict[str, Any] | None,
     candidate: dict[str, Any] | None,
+    settings: DoiDownloadSettings | None = None,
 ) -> tuple[str | None, str | None, dict[str, Any]]:
     diagnostics = dict(diagnostics or {})
     candidate = candidate or {}
     platform = candidate.get("authorized_platform") or (candidate.get("policy") or {}).get("platform")
     if state in ACCESS_STOP_STATUSES and isinstance(platform, dict) and platform.get("campus_only"):
+        if campus_session_mode_enabled(settings):
+            diagnostics.update(
+                {
+                    "campus_session_mode": True,
+                    "manual_wait_suppressed": False,
+                    "authorized_platform": platform,
+                }
+            )
+            return state, reason, diagnostics
         diagnostics.update(
             {
                 "classification": "blocked_by_access",
@@ -1183,12 +1215,17 @@ def no_authorized_landing_attempt(doi: str, metadata: dict[str, Any] | None = No
     )
 
 
-def preflight_candidate_block_attempt(candidate: dict[str, Any]) -> DownloadAttempt | None:
+def preflight_candidate_block_attempt(
+    candidate: dict[str, Any],
+    settings: DoiDownloadSettings | None = None,
+) -> DownloadAttempt | None:
     policy = candidate.get("policy") or {}
     platform = candidate.get("authorized_platform") or policy.get("platform") or {}
     if policy.get("open_access"):
         return None
     if isinstance(platform, dict) and platform.get("campus_only"):
+        if campus_session_mode_enabled(settings):
+            return None
         platform_name = platform.get("name") or "该平台"
         diagnostics = {
             "classification": "blocked_by_access",
@@ -1651,11 +1688,11 @@ def list_doi_verification_queue(
           SELECT latest.id
           FROM doi_download_items latest
           WHERE latest.doi=i.doi
-          ORDER BY latest.updated_at DESC, latest.created_at DESC
+          ORDER BY latest.updated_at DESC, latest.created_at DESC, latest.rowid DESC
           LIMIT 1
         )
           AND i.status IN ({placeholders})
-        ORDER BY i.updated_at DESC
+        ORDER BY i.updated_at DESC, i.rowid DESC
         LIMIT ?
     """
     with connect() as con:
@@ -1666,6 +1703,7 @@ def list_doi_verification_queue(
         item["doi_url"] = f"https://doi.org/{item['doi']}"
         item["queue_action"] = _verification_queue_action(str(item.get("status") or ""))
         item["retry_eligible"] = item.get("status") in VERIFICATION_RETRY_STATUSES
+        item["campus_session_retry_eligible"] = item.get("status") == "blocked_by_captcha"
         result.append(item)
     return result
 
@@ -2003,7 +2041,11 @@ def _candidate_source_group(candidate: dict[str, Any], target_url: str | None = 
     return source or None
 
 
-def _preflight_without_browser(doi: str, metadata: dict[str, Any]) -> tuple[DownloadAttempt | None, list[dict[str, Any]]]:
+def _preflight_without_browser(
+    doi: str,
+    metadata: dict[str, Any],
+    settings: DoiDownloadSettings | None = None,
+) -> tuple[DownloadAttempt | None, list[dict[str, Any]]]:
     candidates = doi_landing_candidates(doi, metadata)
     if not candidates:
         return no_authorized_landing_attempt(doi, metadata), []
@@ -2011,7 +2053,7 @@ def _preflight_without_browser(doi: str, metadata: dict[str, Any]) -> tuple[Down
     last_attempt: DownloadAttempt | None = None
     browser_candidates: list[dict[str, Any]] = []
     for candidate in candidates:
-        preflight_attempt = preflight_candidate_block_attempt(candidate)
+        preflight_attempt = preflight_candidate_block_attempt(candidate, settings)
         if preflight_attempt:
             last_attempt = preflight_attempt
             continue
@@ -2112,7 +2154,13 @@ class PlaywrightDownloadSession:
                 return DownloadAttempt("downloaded", landing_url, domain, landing_url, body)
             state, reason, diagnostics = _classify_access_block_detail(status_code, landing_url, self._body_text(page))
             diagnostics = {**diagnostics, "landing_candidate": candidate}
-            state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
+            state, reason, diagnostics = apply_candidate_manual_wait_policy(
+                state,
+                reason,
+                diagnostics,
+                candidate,
+                self.settings,
+            )
             links = merge_pdf_links(_pdf_links_from_page(page), pdf_links_from_html_snapshot(page.content(), page.url))
             if self.settings.use_deepseek and (state or not links):
                 advice = _deepseek_page_advice(page, links)
@@ -2151,10 +2199,17 @@ class PlaywrightDownloadSession:
                         "manual_access_waited": True,
                         "manual_access_wait_seconds": round(waited_seconds, 1),
                         "manual_access_wait_statuses": sorted(MANUAL_ACCESS_WAIT_STATUSES),
+                        "manual_security_wait_statuses": sorted(MANUAL_SECURITY_WAIT_STATUSES),
                         "landing_candidate": candidate,
                     }
-                    state, reason, diagnostics = apply_candidate_manual_wait_policy(state, reason, diagnostics, candidate)
-                    if state not in MANUAL_ACCESS_WAIT_STATUSES:
+                    state, reason, diagnostics = apply_candidate_manual_wait_policy(
+                        state,
+                        reason,
+                        diagnostics,
+                        candidate,
+                        self.settings,
+                    )
+                    if not should_wait_for_manual_access(state, self.settings):
                         break
             if state and state != "blocked_by_access" and not defer_manual_wait:
                 screenshot, html = _save_failure_artifacts(page, artifacts_dir, doi)
@@ -2230,7 +2285,7 @@ class PlaywrightDownloadSession:
             if not candidates:
                 return no_authorized_landing_attempt(doi, metadata)
             for candidate in candidates:
-                preflight_attempt = preflight_candidate_block_attempt(candidate)
+                preflight_attempt = preflight_candidate_block_attempt(candidate, self.settings)
                 if preflight_attempt:
                     last_attempt = preflight_attempt
                     continue
@@ -2348,7 +2403,7 @@ def run_doi_download_job(
             browser_candidates: list[dict[str, Any]] | None = None
             attempt: DownloadAttempt | None = None
             if browser_runner is None:
-                attempt, browser_candidates = _preflight_without_browser(doi, metadata)
+                attempt, browser_candidates = _preflight_without_browser(doi, metadata, resolved)
 
             if attempt is None:
                 if browser_runner is None:
@@ -2531,9 +2586,19 @@ def run_doi_verification_queue_job(
     metadata_fetcher: Callable[[str], dict[str, Any]] = fetch_crossref_metadata,
     sleeper: Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
-    retry_statuses = _normalize_verification_statuses(statuses or VERIFICATION_RETRY_STATUSES)
+    resolved = resolve_settings(settings)
+    default_retry_statuses: tuple[str, ...] = VERIFICATION_RETRY_STATUSES
+    if campus_session_mode_enabled(resolved):
+        default_retry_statuses = (*VERIFICATION_RETRY_STATUSES, "blocked_by_captcha")
+    retry_statuses = _normalize_verification_statuses(statuses or default_retry_statuses)
     queue_items = list_doi_verification_queue(statuses=retry_statuses)
     dois = [item["doi"] for item in queue_items if item.get("retry_eligible")]
+    if campus_session_mode_enabled(resolved):
+        dois = [
+            item["doi"]
+            for item in queue_items
+            if item.get("retry_eligible") or item.get("campus_session_retry_eligible")
+        ]
     if not dois:
         return {
             "status": "noop",
@@ -2546,13 +2611,14 @@ def run_doi_verification_queue_job(
                 "queued_count": len(queue_items),
                 "retry_count": 0,
                 "profile_dir": str(PROFILE_DIR),
+                "campus_session_mode": resolved.campus_session_mode,
             },
             "verification_queue": queue_items,
             "items": [],
         }
     result = run_doi_download_job(
         "\n".join(dois),
-        settings,
+        resolved,
         browser_runner=browser_runner,
         metadata_fetcher=metadata_fetcher,
         sleeper=sleeper,
@@ -2563,5 +2629,6 @@ def run_doi_verification_queue_job(
         "retry_count": len(dois),
         "profile_dir": str(PROFILE_DIR),
         "persistent_access_session": True,
+        "campus_session_mode": resolved.campus_session_mode,
     }
     return result

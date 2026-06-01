@@ -326,13 +326,16 @@ function renderDoiVerificationQueue(downloads) {
   }
 
   const retryable = queue.filter((item) => item.retry_eligible);
+  const campusRetryable = queue.filter((item) => item.campus_session_retry_eligible);
   const links = queue.map((item) => doiUrl(item.doi));
   return `<div class="doi-failed-links">
     <div class="doi-failed-head">
       <h3>登录/验证队列</h3>
       <span class="pill warn">${esc(queue.length)} 篇</span>
       <span class="pill">${esc(retryable.length)} 篇可重跑</span>
+      ${campusRetryable.length ? `<span class="pill warn">${esc(campusRetryable.length)} 篇需校园授权会话</span>` : ""}
     </div>
+    <div class="muted">勾选“校园授权会话”后，登录/访问队列会使用同一个持久浏览器；验证码或安全验证仍需你本人在窗口中完成。</div>
     <textarea class="copy-box" readonly rows="${Math.min(Math.max(links.length, 4), 10)}">${esc(links.join("\n"))}</textarea>
     ${table(queue, [
       { label: "DOI 链接", render: (row) => `<a href="${esc(doiUrl(row.doi))}" target="_blank" rel="noreferrer">${esc(doiUrl(row.doi))}</a>` },
@@ -699,6 +702,7 @@ function doiSettingsPayload(form) {
     manual_login_timeout_seconds: Number(form.manual_login_timeout_seconds.value || 900),
     headed: Boolean(form.headed.checked),
     allow_manual_login: Boolean(form.allow_manual_login.checked),
+    campus_session_mode: Boolean(form.campus_session_mode.checked),
     fast_mode: Boolean(form.fast_mode.checked),
     use_deepseek: Boolean(form.use_deepseek.checked),
     auto_ingest: Boolean(form.auto_ingest.checked),

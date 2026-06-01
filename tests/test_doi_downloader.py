@@ -80,10 +80,15 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(normal.page_action_wait_max, DEFAULT_PAGE_WAIT_MAX)
         self.assertEqual(normal.manual_login_timeout_seconds, DEFAULT_MANUAL_LOGIN_TIMEOUT_SECONDS)
         self.assertTrue(normal.use_deepseek)
+        self.assertFalse(normal.campus_session_mode)
         self.assertFalse(resolve_settings({"use_deepseek": False}).use_deepseek)
         self.assertNotEqual(normal.page_action_wait_min, normal.article_delay_min)
         self.assertEqual(resolve_settings({"manual_login_timeout_seconds": 5}).manual_login_timeout_seconds, 30)
         self.assertEqual(resolve_settings({"manual_login_timeout_seconds": 7200}).manual_login_timeout_seconds, 3600)
+        campus_session = resolve_settings({"campus_session_mode": True})
+        self.assertTrue(campus_session.campus_session_mode)
+        self.assertTrue(campus_session.headed)
+        self.assertTrue(campus_session.allow_manual_login)
 
         fast = resolve_settings({"fast_mode": True, "max_items": 99})
         self.assertTrue(fast.fast_mode)
@@ -166,16 +171,18 @@ class DoiDownloaderTest(unittest.TestCase):
         enabled = resolve_settings({"headed": True, "allow_manual_login": True})
         disabled = resolve_settings({"headed": True, "allow_manual_login": False})
         background = resolve_settings({"headed": False, "allow_manual_login": True})
+        campus_session = resolve_settings({"campus_session_mode": True})
 
         self.assertTrue(should_wait_for_manual_access("needs_login", enabled))
         self.assertTrue(should_wait_for_manual_access("blocked_by_access", enabled))
         self.assertFalse(should_wait_for_manual_access("blocked_by_captcha", enabled))
+        self.assertTrue(should_wait_for_manual_access("blocked_by_captcha", campus_session))
         self.assertFalse(should_wait_for_manual_access("blocked_by_access", disabled))
         self.assertFalse(should_wait_for_manual_access("needs_login", background))
         self.assertFalse(should_wait_for_manual_access("blocked_by_access", background))
 
     def test_campus_only_platform_suppresses_manual_login_wait(self) -> None:
-        from app.doi_downloader import apply_candidate_manual_wait_policy
+        from app.doi_downloader import apply_candidate_manual_wait_policy, resolve_settings
 
         candidate = {
             "authorized_platform": {
@@ -205,21 +212,34 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(state, "blocked_by_access")
         self.assertTrue(diagnostics["manual_wait_suppressed"])
 
-    def test_campus_only_platform_preflight_blocks_browser_collision(self) -> None:
-        from app.doi_downloader import preflight_candidate_block_attempt
-
-        attempt = preflight_candidate_block_attempt(
-            {
-                "href": "https://doi.org/10.1063/1.4895030",
-                "policy": {"open_access": False},
-                "authorized_platform": {"name": "AIP Journals Complete", "campus_only": True},
-            }
+        state, reason, diagnostics = apply_candidate_manual_wait_policy(
+            "needs_login",
+            "Login, MFA, Shibboleth, or EZproxy page detected",
+            {"matched_terms": ["sign in via your institution"]},
+            candidate,
+            resolve_settings({"campus_session_mode": True}),
         )
+
+        self.assertEqual(state, "needs_login")
+        self.assertIn("Login", reason or "")
+        self.assertFalse(diagnostics["manual_wait_suppressed"])
+        self.assertTrue(diagnostics["campus_session_mode"])
+
+    def test_campus_only_platform_preflight_blocks_browser_collision(self) -> None:
+        from app.doi_downloader import preflight_candidate_block_attempt, resolve_settings
+
+        candidate = {
+            "href": "https://doi.org/10.1063/1.4895030",
+            "policy": {"open_access": False},
+            "authorized_platform": {"name": "AIP Journals Complete", "campus_only": True},
+        }
+        attempt = preflight_candidate_block_attempt(candidate)
 
         self.assertIsNotNone(attempt)
         self.assertEqual(attempt.status, "blocked_by_access")
         self.assertIn("先不打开自动化浏览器", attempt.failure_reason or "")
         self.assertTrue((attempt.diagnostics or {})["preflight_blocked"])
+        self.assertIsNone(preflight_candidate_block_attempt(candidate, resolve_settings({"campus_session_mode": True})))
 
     def test_pdf_save_metadata_sidecar_existing_skip_and_hash(self) -> None:
         from app.doi_downloader import find_existing_download, save_pdf_and_metadata
@@ -870,6 +890,82 @@ class DoiDownloaderTest(unittest.TestCase):
         self.assertEqual(retry["verification_queue"]["retry_count"], 1)
         self.assertEqual(retry["items"][0]["doi"], "10.1234/login")
         self.assertEqual(retry["items"][0]["status"], "downloaded")
+        self.assertEqual(list_doi_verification_queue(), [])
+
+    def test_campus_session_mode_retries_captcha_queue(self) -> None:
+        from app.doi_downloader import (
+            DownloadAttempt,
+            list_doi_verification_queue,
+            run_doi_download_job,
+            run_doi_verification_queue_job,
+        )
+
+        pdf_path = self.root / "mock.pdf"
+        make_pdf(pdf_path, "Mock DOI PDF")
+
+        metadata_fetcher = lambda doi: {
+            "doi": doi,
+            "title": "Mock DOI PDF",
+            "authors": ["Grace Hopper"],
+            "year": 2026,
+            "publisher": "publisher.test",
+        }
+
+        def captcha_runner(doi, _settings, _metadata, _artifacts_dir):
+            return DownloadAttempt(
+                status="blocked_by_captcha",
+                landing_url=f"https://publisher.test/{doi}/security",
+                publisher_domain="publisher.test",
+                failure_reason="CAPTCHA required",
+            )
+
+        run_doi_download_job(
+            "10.1234/captcha",
+            {"out_dir": str(self.root / "papers")},
+            browser_runner=captcha_runner,
+            metadata_fetcher=metadata_fetcher,
+            sleeper=lambda _seconds: None,
+        )
+
+        queue = list_doi_verification_queue()
+        self.assertEqual([item["doi"] for item in queue], ["10.1234/captcha"])
+        self.assertFalse(queue[0]["retry_eligible"])
+        self.assertTrue(queue[0]["campus_session_retry_eligible"])
+
+        default_retry = run_doi_verification_queue_job(
+            {"out_dir": str(self.root / "papers")},
+            browser_runner=captcha_runner,
+            metadata_fetcher=metadata_fetcher,
+            sleeper=lambda _seconds: None,
+        )
+        self.assertEqual(default_retry["status"], "noop")
+        self.assertEqual(default_retry["summary"]["retry_count"], 0)
+
+        seen_settings = []
+
+        def solved_runner(doi, settings, _metadata, _artifacts_dir):
+            seen_settings.append(settings)
+            return DownloadAttempt(
+                status="downloaded",
+                landing_url=f"https://publisher.test/{doi}",
+                publisher_domain="publisher.test",
+                pdf_url=f"https://publisher.test/{doi}.pdf",
+                pdf_bytes=pdf_path.read_bytes(),
+            )
+
+        campus_retry = run_doi_verification_queue_job(
+            {"out_dir": str(self.root / "papers"), "campus_session_mode": True},
+            browser_runner=solved_runner,
+            metadata_fetcher=metadata_fetcher,
+            sleeper=lambda _seconds: None,
+        )
+
+        self.assertEqual(campus_retry["status"], "ready")
+        self.assertEqual(campus_retry["verification_queue"]["retry_count"], 1)
+        self.assertTrue(campus_retry["verification_queue"]["campus_session_mode"])
+        self.assertTrue(seen_settings[0].campus_session_mode)
+        self.assertTrue(seen_settings[0].headed)
+        self.assertTrue(seen_settings[0].allow_manual_login)
         self.assertEqual(list_doi_verification_queue(), [])
 
     def test_max_items_is_batch_size_and_processes_full_list(self) -> None:

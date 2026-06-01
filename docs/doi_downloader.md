@@ -65,10 +65,24 @@ Visible browser debugging and manual institutional login:
 
 By default, DOI downloads run in the background and should not open a visible automation browser. `--headed` is an explicit debug mode that shows the Playwright browser for the whole run. Only when both `--headed` and manual waiting are enabled can login and institutional access pages keep that visible browser open so the user can complete authorized access manually. Login pages are recorded as `needs_login` and the batch continues to later DOI values. CAPTCHA and publisher security verification pages are recorded as blocked states instead of being driven repeatedly by the automated browser.
 
+For university-library access that repeatedly triggers publisher robot checks, use the explicit campus session mode:
+
+```bash
+./scripts/download_by_doi.py --doi-file dois.txt --out data/raw/papers --campus-session-mode --manual-login-timeout-seconds 900
+```
+
+Campus session mode reuses the DOI downloader's isolated persistent Playwright profile, opens a visible browser, and waits for the user to complete school login, MFA, EZproxy/Shibboleth, or CAPTCHA/security verification. It does not solve or bypass CAPTCHA automatically. If the verification does not clear inside the manual wait window, the item remains blocked and the job stops or records the blocked state according to the normal policy.
+
 The web UI summarizes a login/verification queue for `needs_login`, `blocked_by_access`, CAPTCHA/security, and rate-limit items. Queue retry defaults to `needs_login` and `blocked_by_access` only, reusing the DOI downloader's persistent Playwright profile. CAPTCHA/security and rate-limit items remain visible for manual handling or later retry. The same retry path is available from the CLI:
 
 ```bash
 ./scripts/download_by_doi.py --retry-verification-queue --auto-ingest
+```
+
+When `--campus-session-mode` is included with `--retry-verification-queue`, CAPTCHA/security items are also selected for retry because a human user is expected to clear the verification in the visible browser:
+
+```bash
+./scripts/download_by_doi.py --retry-verification-queue --campus-session-mode --auto-ingest
 ```
 
 If a publisher security page loops inside the automated browser, use the real-browser manual assist mode:
@@ -110,6 +124,7 @@ Use the `DOI 下载器` page to:
 - set the per-batch DOI limit while still processing the full list;
 - run with or without visible browser mode;
 - allow manual login/security verification waiting and set the wait window;
+- use campus authorization session mode for school-library login or publisher CAPTCHA pages that require human verification;
 - enable fast mode;
 - optionally add downloaded PDFs to the document library;
 - view job and item logs;

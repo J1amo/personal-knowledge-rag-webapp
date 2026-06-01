@@ -32,6 +32,14 @@ def main() -> int:
         help="Allow manual waiting on login or access pages when --headed is also enabled.",
     )
     parser.add_argument(
+        "--campus-session-mode",
+        action="store_true",
+        help=(
+            "Use a visible persistent browser session for authorized campus/library access. "
+            "Implies --headed and --allow-manual-login and lets the user clear CAPTCHA/security pages manually."
+        ),
+    )
+    parser.add_argument(
         "--manual-login-timeout-seconds",
         type=int,
         default=None,
@@ -61,6 +69,7 @@ def main() -> int:
         "max_items": args.max_items,
         "headed": args.headed,
         "allow_manual_login": args.allow_manual_login,
+        "campus_session_mode": args.campus_session_mode,
         "manual_login_timeout_seconds": args.manual_login_timeout_seconds,
         "fast_mode": args.fast_mode,
         "auto_ingest": args.auto_ingest,
